@@ -310,6 +310,7 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
                     <span className="block font-semibold text-slate-800">{c.company_name}</span>
                     <span className="block text-xs text-slate-500">{companyAddressLines(c).join(", ") || "Address not set"}</span>
                     {c.gstin && <span className="block text-xs text-slate-500">GSTIN: {c.gstin}</span>}
+                    {!c.logo_url && <span className="block text-xs text-amber-600">No logo uploaded yet</span>}
                     <span className="mt-1 inline-block"><Badge tone="blue">{c.quotation_prefix}</Badge></span>
                   </span>
                 </button>
@@ -434,6 +435,12 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
                   {busy === "pdf" ? "Generating…" : "Download PDF"}
                 </Button>
                 <Button variant="secondary" onClick={() => exportPdf("print")} disabled={!!busy}>Print</Button>
+                {company && !company.logo_url && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    No logo uploaded for {company.company_name}.{" "}
+                    <Link href={`/settings?tab=companies&edit=${company.id}`} className="font-medium underline">Upload logo</Link>
+                  </p>
+                )}
                 {company && (
                   <p className="pt-1 text-xs text-slate-500">
                     Using details of <b>{companyTitle(company)}</b>. Edit them in{" "}

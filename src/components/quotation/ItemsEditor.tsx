@@ -43,6 +43,12 @@ export function unitsFor(material: Material | undefined, units: UnitType[]): Uni
   return active.filter((u) => material.unit_ids.includes(u.id));
 }
 
+/** The unit a material is quoted in by default (configured default, else first available active unit). */
+export function defaultUnitFor(material: Material, units: UnitType[]): UnitType | undefined {
+  const allowed = unitsFor(material, units);
+  return allowed.find((u) => u.id === material.default_unit_id) ?? allowed[0];
+}
+
 const toNum = (s: string) => (s.trim() === "" ? NaN : Number(s));
 
 export function ItemsEditor({ items, onChange, materials, units, taxMode, canOverrideGst, errors }: Props) {
@@ -55,9 +61,8 @@ export function ItemsEditor({ items, onChange, materials, units, taxMode, canOve
     const it = items[i];
     const m = materials.find((x) => x.id === id);
     if (!m) return update(i, { material_id: null, material_name: "" });
-    const allowed = unitsFor(m, units);
-    const keepUnit = it.unit_id && allowed.some((u) => u.id === it.unit_id);
-    const unit = keepUnit ? units.find((u) => u.id === it.unit_id) : allowed.find((u) => u.id === m.default_unit_id) ?? allowed[0];
+    // Unit always comes from the material's configuration: its default unit, else its first available unit.
+    const unit = defaultUnitFor(m, units);
     const descWasAuto = !it.description.trim() || it.description === it.material_name || it.description === materials.find((x) => x.id === it.material_id)?.description;
     update(i, {
       material_id: m.id,
@@ -145,16 +150,24 @@ export function ItemsEditor({ items, onChange, materials, units, taxMode, canOve
                   aria-label={`Quantity for item ${i + 1}`}
                 />
               </Field>
-              <Field label="Unit" required error={e("unit")} className="md:col-span-4">
-                <Select value={it.unit_id ?? ""} onChange={(ev) => pickUnit(i, ev.target.value)} invalid={!!e("unit")} aria-label={`Unit for item ${i + 1}`}>
-                  <option value="">Unit…</option>
+              <Field label="Unit" required error={e("unit")} className="md:col-span-2">
+                <Select
+                  value={it.unit_id ?? ""}
+                  onChange={(ev) => pickUnit(i, ev.target.value)}
+                  invalid={!!e("unit")}
+                  aria-label={`Unit for item ${i + 1}`}
+                  title={it.unit_id ? unitLabel({ code: it.unit_code, name: it.unit_name }) : undefined}
+                  disabled={!it.material_id}
+                >
+                  {/* Short codes keep the box readable; the full name is in the tooltip. */}
+                  {!it.unit_id && <option value="">{it.material_id ? "Select" : "—"}</option>}
                   {unitOptions.map((u) => (
-                    <option key={u.id} value={u.id}>{unitLabel(u)}{u.is_active ? "" : " (inactive)"}</option>
+                    <option key={u.id} value={u.id} title={u.name}>{u.code}{u.is_active ? "" : " (inactive)"}</option>
                   ))}
                   {!it.unit_id && it.unit_code && <option value="">{it.unit_code}</option>}
                 </Select>
               </Field>
-              <Field label="Rate (₹)" required error={e("rate")} className="md:col-span-2">
+              <Field label="Rate (₹)" required error={e("rate")} className="md:col-span-3">
                 <Input
                   type="number"
                   inputMode="decimal"
@@ -178,7 +191,7 @@ export function ItemsEditor({ items, onChange, materials, units, taxMode, canOve
                   invalid={!!e("discount")}
                 />
               </Field>
-              <Field label="GST %" error={e("gst")} className="md:col-span-2">
+              <Field label="GST %" error={e("gst")} className="md:col-span-3">
                 {it.gst_overridden && canOverrideGst ? (
                   <div className="flex gap-1">
                     <Input

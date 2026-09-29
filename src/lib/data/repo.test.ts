@@ -134,12 +134,15 @@ describe("upgrading data saved before GST", () => {
     const legacy = new Repo(new LocalBackend(old));
     await legacy.listCompanies(); // creates the stored data
     const raw = JSON.parse(old.getItem("kipipl-quotation-maker:v1")!);
-    for (const m of raw.materials) { delete m.gst_rate; delete m.tax_type; }
+    for (const m of raw.materials) { delete m.gst_rate; delete m.tax_type; m.default_unit_id = null; }
     raw.companies[0].gstin = ""; // blank → filled
     raw.companies[2].gstin = "33ABCDE1234F1Z5"; // admin-entered → kept
     old.setItem("kipipl-quotation-maker:v1", JSON.stringify(raw));
     const upgraded = new Repo(new LocalBackend(old));
     expect((await upgraded.listMaterials()).every((m) => m.gst_rate === 5 && m.tax_type === "GST")).toBe(true);
+    const units = await upgraded.listUnits();
+    const defaults = (await upgraded.listMaterials()).map((m) => [m.name, units.find((u) => u.id === m.default_unit_id)?.code]);
+    expect(defaults).toEqual([["Flyash", "MT"], ["P Sand Dry", "M3"]]);
     const after = await upgraded.listCompanies();
     expect(after[0].gstin).toBe("33ACCPC2634C1ZI");
     expect(after[2].gstin).toBe("33ABCDE1234F1Z5");
@@ -196,6 +199,19 @@ describe("product-level GST on quotations", () => {
     await expect(repo.saveQuotation({ ...q, notes: "ok" })).resolves.toMatchObject({ notes: "ok" });
     // …but cannot change the overridden rate.
     await expect(repo.saveQuotation({ ...q, items: q.items.map((i, n) => (n === 0 ? { ...i, gst_rate: 0 } : i)) })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("requires every active material to have a default unit", async () => {
+    const base = { code: "", description: "", hsn_code: "", unit_ids: [], default_rate: null, gst_rate: 5, tax_type: "GST" as const };
+    await expect(repo.saveMaterial({ ...base, name: "Blue Metal", default_unit_id: null, is_active: true })).rejects.toMatchObject({
+      errors: { default_unit_id: expect.any(String) },
+    });
+    // Inactive drafts may be saved without one
+    await expect(repo.saveMaterial({ ...base, name: "Blue Metal", default_unit_id: null, is_active: false })).resolves.toBeTruthy();
+    // Picking available units without a default uses the first one
+    const mt = (await repo.listUnits()).find((u) => u.code === "MT")!;
+    const rmc = await repo.saveMaterial({ ...base, name: "RMC", default_unit_id: null, unit_ids: [mt.id], is_active: true });
+    expect(rmc.default_unit_id).toBe(mt.id);
   });
 
   it("validates the material GST rate", async () => {

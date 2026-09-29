@@ -27,6 +27,13 @@ export function MaterialsTab() {
   const toast = useToast();
   const [editing, setEditing] = useState<MaterialInput | null>(null);
   const unitCode = (id: string | null) => units.find((u) => u.id === id)?.code ?? "";
+  const unitProblem = (m: Material) => {
+    const u = units.find((x) => x.id === m.default_unit_id);
+    if (!u) return "No default unit";
+    if (!u.is_active) return `${u.code} is inactive`;
+    return null;
+  };
+  const broken = materials.filter((m) => m.is_active && unitProblem(m));
 
   const remove = async (m: Material) => {
     if (!confirm(`Delete material "${m.name}"?`)) return;
@@ -54,6 +61,12 @@ export function MaterialsTab() {
         <p className="text-sm text-slate-500">Active materials appear in the quotation material dropdown. Inactive ones stay on old quotations.</p>
         <Button onClick={() => setEditing(blank(settings.default_gst_rate))}>+ Add Material</Button>
       </div>
+      {broken.length > 0 && (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700" role="alert">
+          {broken.map((m) => m.name).join(", ")} {broken.length === 1 ? "has" : "have"} no valid default unit. Edit{" "}
+          {broken.length === 1 ? "it" : "them"} and choose a default unit so quotations load the right unit.
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
@@ -79,7 +92,9 @@ export function MaterialsTab() {
                   {m.description && m.description !== m.name && <p className="text-xs text-slate-500">{m.description}</p>}
                 </td>
                 <td className="px-2 py-2.5 text-slate-600">{[m.code, m.hsn_code].filter(Boolean).join(" · ") || "—"}</td>
-                <td className="px-2 py-2.5">{unitCode(m.default_unit_id) || "—"}</td>
+                <td className="px-2 py-2.5" data-testid="material-default-unit">
+                  {unitProblem(m) ? <Badge tone="red">{unitProblem(m)}</Badge> : unitCode(m.default_unit_id)}
+                </td>
                 <td className="px-2 py-2.5">
                   <div className="flex flex-wrap gap-1">
                     {m.unit_ids.length ? m.unit_ids.map((id) => <Badge key={id}>{unitCode(id)}</Badge>) : <span className="text-xs text-slate-400">Any unit</span>}
@@ -196,9 +211,9 @@ function MaterialForm({ initial, onClose, onSaved }: { initial: MaterialInput; o
           </div>
           <p className="mt-1 text-xs text-slate-400">{errors.unit_ids ?? "Leave all unticked to allow every active unit."}</p>
         </fieldset>
-        <Field label="Default Unit" error={errors.default_unit_id}>
-          <Select value={f.default_unit_id ?? ""} onChange={(e) => set("default_unit_id", e.target.value || null)}>
-            <option value="">None</option>
+        <Field label="Default Unit" required error={errors.default_unit_id} hint="Loaded automatically when this material is picked">
+          <Select value={f.default_unit_id ?? ""} onChange={(e) => set("default_unit_id", e.target.value || null)} invalid={!!errors.default_unit_id} aria-label="Default Unit">
+            <option value="">Select default unit…</option>
             {defaultChoices.map((u) => (
               <option key={u.id} value={u.id}>{unitLabel(u)}</option>
             ))}

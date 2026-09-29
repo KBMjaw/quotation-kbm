@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { emptyCompany } from "@/lib/defaults";
 import { logoToPng } from "@/lib/image";
 import { InUseError } from "@/lib/data/repo";
@@ -15,6 +16,12 @@ export function CompaniesTab() {
   const { companies, repo, refresh } = useData();
   const toast = useToast();
   const [editing, setEditing] = useState<CompanyInput | null>(null);
+  // ?edit=<id> opens that company's form (used by "Upload logo" links)
+  const editId = useSearchParams().get("edit");
+  useEffect(() => {
+    const c = editId ? companies.find((x) => x.id === editId) : undefined;
+    if (c) setEditing({ ...c, bank_details: { ...c.bank_details } });
+  }, [editId]);
 
   const remove = async (c: Company) => {
     if (!confirm(`Delete ${c.company_name}?`)) return;
@@ -48,6 +55,7 @@ export function CompaniesTab() {
                   <Badge tone="blue">{c.quotation_prefix}</Badge>
                   <Badge tone={c.is_active ? "green" : "slate"}>{c.is_active ? "Active" : "Inactive"}</Badge>
                   <Badge>Next #{c.next_number}</Badge>
+                  {!c.logo_url && <Badge tone="amber">No logo</Badge>}
                 </div>
               </div>
             </div>

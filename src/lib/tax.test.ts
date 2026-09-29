@@ -27,6 +27,17 @@ describe("product-level GST", () => {
     ]);
   });
 
+  it("reported scenario: P Sand Dry 25,000 @5% + Flyash 6,000 @18% = 33,330", () => {
+    const t = computeTotals([line(10, 2500, 5), line(2, 3000, 18)], "CGST_SGST");
+    expect(t.taxable_total).toBe(31000);
+    expect(t.gst_summary).toEqual([
+      { rate: 5, taxable: 25000, cgst: 625, sgst: 625, igst: 0, tax: 1250 },
+      { rate: 18, taxable: 6000, cgst: 540, sgst: 540, igst: 0, tax: 1080 },
+    ]);
+    expect(t.tax_total).toBe(2330);
+    expect(t.grand_total).toBe(33330);
+  });
+
   it("IGST for inter-state supply", () => {
     const t = computeTotals(items, "IGST");
     expect(t.tax_lines).toEqual([

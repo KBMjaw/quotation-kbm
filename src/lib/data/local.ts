@@ -50,7 +50,13 @@ export function seed(db: DB): DB {
 
 /** Brings data saved by earlier versions up to the current shape. */
 function upgrade(db: DB): DB {
+  const unitByCode = (code: string) => db.units.find((u) => norm(u.code) === norm(code))?.id;
   for (const m of db.materials) {
+    // Every material gets a default unit: its seeded default, else its first available unit.
+    if (!m.default_unit_id || !db.units.some((u) => u.id === m.default_unit_id)) {
+      const seeded = SEED_MATERIALS.find((x) => norm(x.name) === norm(m.name));
+      m.default_unit_id = (seeded && unitByCode(seeded.default_unit)) ?? m.unit_ids?.[0] ?? null;
+    }
     if (m.tax_type == null) m.tax_type = "GST";
     if (m.gst_rate == null) {
       const seeded = SEED_MATERIALS.find((x) => norm(x.name) === norm(m.name));

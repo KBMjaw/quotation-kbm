@@ -52,7 +52,10 @@ export function validateMaterial(input: MaterialInput, existing: Material[], uni
     e.code = "Another material already uses this code";
   const unitIds = new Set(units.map((u) => u.id));
   if (input.unit_ids.some((id) => !unitIds.has(id))) e.unit_ids = "Unknown unit selected";
-  if (input.default_unit_id && input.unit_ids.length && !input.unit_ids.includes(input.default_unit_id))
+  const defaultUnit = units.find((u) => u.id === input.default_unit_id);
+  if (input.is_active && !defaultUnit) e.default_unit_id = "Every active material needs a default unit";
+  else if (input.is_active && defaultUnit && !defaultUnit.is_active) e.default_unit_id = `Default unit ${defaultUnit.code} is inactive`;
+  else if (input.default_unit_id && input.unit_ids.length && !input.unit_ids.includes(input.default_unit_id))
     e.default_unit_id = "Default unit must be one of the available units";
   if (input.tax_type !== "EXEMPT" && (!Number.isFinite(input.gst_rate) || input.gst_rate < 0 || input.gst_rate > 100))
     e.gst_rate = "GST rate must be between 0 and 100";

@@ -173,3 +173,16 @@ $$;
 drop trigger if exists quotation_items_changed on public.quotation_items;
 create trigger quotation_items_changed after insert or update or delete on public.quotation_items
   for each row execute function public.quotation_items_changed();
+
+-- ---------------------------------------------------------------------------
+-- Every material needs a default unit (seeded default, else its first available unit)
+-- ---------------------------------------------------------------------------
+update public.materials m
+set default_unit_id = u.id
+from (values ('flyash', 'MT'), ('p sand dry', 'M3')) as v(name, code)
+join public.unit_types u on lower(u.code) = lower(v.code)
+where lower(m.name) = v.name and m.default_unit_id is null;
+
+update public.materials m
+set default_unit_id = (select mu.unit_id from public.material_units mu where mu.material_id = m.id limit 1)
+where m.default_unit_id is null;
