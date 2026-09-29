@@ -12,7 +12,7 @@ import { ValidationError, type Errors } from "@/lib/validation";
 import { buildView, companyAddressLines, companyTitle } from "@/lib/view";
 import { useData } from "../DataProvider";
 import { Badge, Button, Card, Field, Input, Select, Textarea, cx, errorMessage, useToast } from "../ui";
-import { GstSummaryTable } from "./GstSummaryTable";
+import { GstSummaryTable, sum } from "./GstSummaryTable";
 import { ItemsEditor, newItem } from "./ItemsEditor";
 import { CompanyLogo, QuotationPreview } from "./QuotationPreview";
 
@@ -473,9 +473,9 @@ function TotalsCard({ totals, taxMode }: { totals: ReturnType<typeof computeTota
         {totals.discount_total > 0 && <Row k="Sub Total" v={totals.subtotal} />}
         {totals.discount_total > 0 && <Row k="Discount" v={-totals.discount_total} />}
         <Row k="Taxable Value" v={totals.taxable_total} testId="taxable-total" />
-        {totals.tax_lines.map((t, i) => (
-          <Row key={i} k={`${t.label} @ ${formatPct(t.rate)}`} v={t.amount} />
-        ))}
+        {taxMode === "CGST_SGST" && <Row k="Total CGST" v={sum(totals, "cgst")} testId="cgst-total" />}
+        {taxMode === "CGST_SGST" && <Row k="Total SGST" v={sum(totals, "sgst")} testId="sgst-total" />}
+        {taxMode === "IGST" && <Row k="Total IGST" v={sum(totals, "igst")} testId="igst-total" />}
         {taxMode !== "NONE" && <Row k="Total GST" v={totals.tax_total} testId="gst-total" strong />}
         {totals.round_off !== 0 && <Row k="Round Off" v={totals.round_off} />}
         <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900">

@@ -1,7 +1,7 @@
 "use client";
 
 import { amountInWords, formatAmount, formatDate, formatPct, formatQty, lineAmounts } from "@/lib/calc";
-import { GstSummaryTable } from "./GstSummaryTable";
+import { GstSummaryTable, sum } from "./GstSummaryTable";
 import {
   companyAddressLines,
   companyContactLine,
@@ -37,6 +37,8 @@ export function QuotationPreview({ v }: { v: QuotationView }) {
   const brand = c.brand_color || "#1F3A93";
   const showDisc = v.items.some((i) => i.discount_pct > 0);
   const showGst = v.tax_mode !== "NONE";
+  // Tax columns follow the tax type: CGST + SGST (intra-state) or IGST (inter-state).
+  const taxCols = v.tax_mode === "CGST_SGST" ? (["CGST", "SGST"] as const) : v.tax_mode === "IGST" ? (["IGST"] as const) : ([] as const);
   const showHsn = v.items.some((i) => i.hsn_code.trim());
   const title = companyTitle(c);
   const terms = splitLines(termsFor(v));
@@ -109,42 +111,49 @@ export function QuotationPreview({ v }: { v: QuotationView }) {
           <table className="w-full border-collapse text-[10.5px]" data-testid="preview-items">
             <thead>
               <tr className="text-white" style={{ background: brand }}>
-                <th className="w-7 px-1 py-1.5 text-center">S.No</th>
-                <th className="px-1.5 py-1.5 text-left">Product</th>
-                <th className="w-14 px-1.5 py-1.5 text-right">Qty</th>
-                <th className="w-11 px-1 py-1.5 text-center">Unit</th>
-                <th className="w-[70px] px-1.5 py-1.5 text-right">Rate</th>
-                {showDisc && <th className="w-11 px-1.5 py-1.5 text-right">Disc.</th>}
-                <th className="w-20 px-1.5 py-1.5 text-right">{showGst ? "Taxable Value" : "Amount"}</th>
-                {showGst && <th className="w-11 px-1.5 py-1.5 text-right">GST %</th>}
-                {showGst && <th className="w-[70px] px-1.5 py-1.5 text-right">GST Amt</th>}
+                <th className="w-6 px-1 py-1.5 text-center">#</th>
+                <th className="px-1.5 py-1.5 text-left">Material</th>
+                {showHsn && <th className="w-12 px-1 py-1.5 text-center">HSN</th>}
+                <th className="w-12 px-1.5 py-1.5 text-right">Qty</th>
+                <th className="w-10 px-1 py-1.5 text-center">Unit</th>
+                <th className="w-[66px] px-1.5 py-1.5 text-right">Rate</th>
+                {showDisc && <th className="w-10 px-1.5 py-1.5 text-right">Disc.</th>}
+                <th className="w-20 px-1.5 py-1.5 text-right">{showGst ? "Taxable Amount" : "Amount"}</th>
+                {taxCols.map((t) => (
+                  <th key={t} className="w-[66px] px-1.5 py-1.5 text-right">{t}</th>
+                ))}
                 {showGst && <th className="w-20 px-1.5 py-1.5 text-right">Total</th>}
               </tr>
             </thead>
             <tbody>
               {v.items.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="py-6 text-center text-slate-400">No materials added yet</td>
+                  <td colSpan={11} className="py-6 text-center text-slate-400">No materials added yet</td>
                 </tr>
               )}
               {v.items.map((it, i) => {
                 const a = lineAmounts(it, v.tax_mode);
                 const desc = it.description.trim().toLowerCase() !== it.material_name.trim().toLowerCase() ? it.description.trim() : "";
+                const tax = { CGST: [it.gst_rate / 2, a.cgst], SGST: [it.gst_rate / 2, a.sgst], IGST: [it.gst_rate, a.igst] } as const;
                 return (
-                  <tr key={it.id || i} className={i % 2 ? "bg-slate-50" : ""} style={{ borderBottom: "1px solid #cbd5e1" }}>
+                  <tr key={it.id || i} className={i % 2 ? "bg-slate-50" : ""} style={{ borderBottom: "1px solid #cbd5e1" }} data-testid="preview-row">
                     <td className="px-1 py-1.5 text-center align-top">{i + 1}</td>
                     <td className="px-1.5 py-1.5 align-top">
                       <b>{it.material_name || "—"}</b>
                       {desc && <div className="text-[9.5px] text-slate-500">{desc}</div>}
-                      {showHsn && it.hsn_code && <div className="text-[9.5px] text-slate-500">HSN: {it.hsn_code}</div>}
                     </td>
+                    {showHsn && <td className="px-1 py-1.5 text-center align-top">{it.hsn_code}</td>}
                     <td className="px-1.5 py-1.5 text-right align-top">{formatQty(it.quantity)}</td>
                     <td className="px-1 py-1.5 text-center align-top">{it.unit_code}</td>
                     <td className="px-1.5 py-1.5 text-right align-top">{formatAmount(it.rate)}</td>
                     {showDisc && <td className="px-1.5 py-1.5 text-right align-top">{it.discount_pct ? formatPct(it.discount_pct) : "-"}</td>}
                     <td className="px-1.5 py-1.5 text-right align-top">{formatAmount(a.taxable)}</td>
-                    {showGst && <td className="px-1.5 py-1.5 text-right align-top">{formatPct(it.gst_rate)}</td>}
-                    {showGst && <td className="px-1.5 py-1.5 text-right align-top">{formatAmount(a.tax)}</td>}
+                    {taxCols.map((t) => (
+                      <td key={t} className="px-1.5 py-1.5 text-right align-top" data-testid={`preview-${t.toLowerCase()}`}>
+                        <div className="text-[9px] text-slate-500">{formatPct(tax[t][0])}</div>
+                        <div>{formatAmount(tax[t][1])}</div>
+                      </td>
+                    ))}
                     {showGst && <td className="px-1.5 py-1.5 text-right align-top font-semibold">{formatAmount(a.total)}</td>}
                   </tr>
                 );
@@ -181,9 +190,9 @@ export function QuotationPreview({ v }: { v: QuotationView }) {
               {v.totals.discount_total > 0 && <TotRow k="Sub Total" v={v.totals.subtotal} />}
               {v.totals.discount_total > 0 && <TotRow k="Less: Discount" v={-v.totals.discount_total} />}
               <TotRow k="Taxable Value" v={v.totals.taxable_total} />
-              {v.totals.tax_lines.map((t, i) => (
-                <TotRow key={i} k={`${t.label} @ ${formatPct(t.rate)}`} v={t.amount} />
-              ))}
+              {v.tax_mode === "CGST_SGST" && <TotRow k="Total CGST" v={sum(v.totals, "cgst")} />}
+              {v.tax_mode === "CGST_SGST" && <TotRow k="Total SGST" v={sum(v.totals, "sgst")} />}
+              {v.tax_mode === "IGST" && <TotRow k="Total IGST" v={sum(v.totals, "igst")} />}
               {showGst && <TotRow k="Total GST" v={v.totals.tax_total} bold />}
               {v.totals.round_off !== 0 && <TotRow k="Round Off" v={v.totals.round_off} />}
               <div className="mt-1 flex justify-between rounded px-2 py-1.5 text-[13px] font-bold text-white" style={{ background: brand }}>

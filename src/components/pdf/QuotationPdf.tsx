@@ -101,21 +101,27 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
   const terms = splitLines(termsFor(v));
   const footer = footerFor(v);
 
-  const cols: Col[] = [
-    { key: "no", label: "S.No", width: 26, align: "center" },
-    { key: "item", label: "Product", width: "flex" },
-    { key: "qty", label: "Qty", width: 40, align: "right" },
-    { key: "unit", label: "Unit", width: 32, align: "center" },
-    { key: "rate", label: "Rate (₹)", width: 54, align: "right" },
-    ...(showDisc ? [{ key: "disc", label: "Disc.", width: 32, align: "right" as const }] : []),
-    { key: "taxable", label: showGst ? "Taxable Value" : "Amount (₹)", width: 62, align: "right" },
-    ...(showGst
+  // Tax columns follow the tax type: CGST + SGST (intra-state), IGST (inter-state) or none.
+  const taxCols: Col[] =
+    v.tax_mode === "CGST_SGST"
       ? [
-          { key: "gst", label: "GST %", width: 32, align: "right" as const },
-          { key: "gstamt", label: "GST Amount", width: 54, align: "right" as const },
-          { key: "total", label: "Total (₹)", width: 64, align: "right" as const },
+          { key: "cgst", label: "CGST", width: 54, align: "right" },
+          { key: "sgst", label: "SGST", width: 54, align: "right" },
         ]
-      : []),
+      : v.tax_mode === "IGST"
+        ? [{ key: "igst", label: "IGST", width: 60, align: "right" }]
+        : [];
+  const cols: Col[] = [
+    { key: "no", label: "#", width: 16, align: "center" },
+    { key: "item", label: "Material", width: "flex" },
+    ...(showHsn ? [{ key: "hsn", label: "HSN", width: 34, align: "center" as const }] : []),
+    { key: "qty", label: "Qty", width: 36, align: "right" },
+    { key: "unit", label: "Unit", width: 28, align: "center" },
+    { key: "rate", label: "Rate (₹)", width: 54, align: "right" },
+    ...(showDisc ? [{ key: "disc", label: "Disc.", width: 28, align: "right" as const }] : []),
+    { key: "taxable", label: showGst ? "Taxable Amount" : "Amount (₹)", width: 62, align: "right" },
+    ...taxCols,
+    ...(showGst ? [{ key: "total", label: "Total (₹)", width: 64, align: "right" as const }] : []),
   ];
   const colStyle = (col: Col) => [
     s.cell,
@@ -206,25 +212,27 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
                 <>
                   <Text style={{ fontWeight: 700 }}>{it.material_name}</Text>
                   {desc ? <Text style={s.desc}>{desc}</Text> : null}
-                  {showHsn && it.hsn_code ? <Text style={s.desc}>HSN: {it.hsn_code}</Text> : null}
                 </>
               ),
+              hsn: it.hsn_code,
               qty: formatQty(it.quantity),
               unit: it.unit_code,
               rate: formatAmount(it.rate),
               disc: it.discount_pct ? formatPct(it.discount_pct) : "-",
               taxable: formatAmount(a.taxable),
-              gst: formatPct(it.gst_rate),
-              gstamt: formatAmount(a.tax),
+              // Each tax cell shows its rate above its amount, e.g. "2.5%" / "625.00".
+              cgst: <TaxCell rate={it.gst_rate / 2} amount={a.cgst} width={54} />,
+              sgst: <TaxCell rate={it.gst_rate / 2} amount={a.sgst} width={54} />,
+              igst: <TaxCell rate={it.gst_rate} amount={a.igst} width={60} />,
               total: formatAmount(a.total),
             };
             return (
               <View key={it.id || i} style={[s.tr, i % 2 ? { backgroundColor: ZEBRA } : {}]} wrap={false}>
                 {cols.map((col) =>
-                  col.key === "item" ? (
-                    <View key={col.key} style={colStyle(col)}>{cells.item}</View>
+                  typeof cells[col.key] !== "string" ? (
+                    <View key={col.key} style={colStyle(col)}>{cells[col.key]}</View>
                   ) : (
-                    <Text key={col.key} style={colStyle(col)}>{cells[col.key] as string}</Text>
+                    <Text key={col.key} style={[...colStyle(col), fit(cells[col.key] as string, col.width)]}>{cells[col.key] as string}</Text>
                   ),
                 )}
               </View>
@@ -257,9 +265,9 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
             {v.totals.discount_total ? <Tot k="Sub Total" v={v.totals.subtotal} /> : null}
             {v.totals.discount_total ? <Tot k="Less: Discount" v={-v.totals.discount_total} /> : null}
             <Tot k="Taxable Value" v={v.totals.taxable_total} />
-            {v.totals.tax_lines.map((t, i) => (
-              <Tot key={i} k={`${t.label} @ ${formatPct(t.rate)}`} v={t.amount} />
-            ))}
+            {v.tax_mode === "CGST_SGST" ? <Tot k="Total CGST" v={taxSum(v.totals, "cgst")} /> : null}
+            {v.tax_mode === "CGST_SGST" ? <Tot k="Total SGST" v={taxSum(v.totals, "sgst")} /> : null}
+            {v.tax_mode === "IGST" ? <Tot k="Total IGST" v={taxSum(v.totals, "igst")} /> : null}
             {showGst ? <Tot k="Total GST" v={v.totals.tax_total} bold /> : null}
             {v.totals.round_off ? <Tot k="Round Off" v={v.totals.round_off} /> : null}
             <View style={[s.grand, { backgroundColor: brand }]}>
@@ -381,3 +389,24 @@ function GstSummary({ v }: { v: QuotationView }) {
     </View>
   );
 }
+
+function TaxCell({ rate, amount, width }: { rate: number; amount: number; width: number }) {
+  const text = formatAmount(amount);
+  return (
+    <View style={{ alignItems: "flex-end" }}>
+      <Text style={{ fontSize: 7, color: MUTED, textAlign: "right" }}>{formatPct(rate)}</Text>
+      <Text style={[{ textAlign: "right" }, fit(text, width)]}>{text}</Text>
+    </View>
+  );
+}
+
+/** Shrinks a number's font just enough to fit its column (only very large amounts are affected). */
+function fit(text: string, width: number | "flex") {
+  if (width === "flex" || !text) return {};
+  const available = width - 8; // cell padding
+  const size = available / (text.length * 0.56);
+  return size < 8.5 ? { fontSize: Math.max(5.5, Math.floor(size * 10) / 10) } : {};
+}
+
+const taxSum = (t: QuotationView["totals"], k: "cgst" | "sgst" | "igst") =>
+  Math.round(t.gst_summary.reduce((acc, r) => acc + r[k], 0) * 100) / 100;

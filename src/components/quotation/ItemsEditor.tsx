@@ -226,10 +226,14 @@ export function ItemsEditor({ items, onChange, materials, units, taxMode, canOve
                 {showGst ? (
                   <>
                     <span>Taxable <b className="text-slate-700">₹{formatAmount(a.taxable)}</b></span>
-                    <span>
-                      GST {formatPct(it.gst_rate)} <b className="text-slate-700">₹{formatAmount(a.tax)}</b>
-                      {taxMode === "CGST_SGST" && a.tax > 0 && ` (CGST ₹${formatAmount(a.cgst)} + SGST ₹${formatAmount(a.sgst)})`}
-                    </span>
+                    {taxMode === "CGST_SGST" ? (
+                      <>
+                        <span data-testid="item-cgst">CGST {formatPct(it.gst_rate / 2)} <b className="text-slate-700">₹{formatAmount(a.cgst)}</b></span>
+                        <span data-testid="item-sgst">SGST {formatPct(it.gst_rate / 2)} <b className="text-slate-700">₹{formatAmount(a.sgst)}</b></span>
+                      </>
+                    ) : (
+                      <span data-testid="item-igst">IGST {formatPct(it.gst_rate)} <b className="text-slate-700">₹{formatAmount(a.igst)}</b></span>
+                    )}
                     <span>Total <b className="text-slate-700">₹{formatAmount(a.total)}</b></span>
                   </>
                 ) : (
