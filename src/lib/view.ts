@@ -3,6 +3,8 @@ import type { Company, Customer, QuotationItem, QuotationSettings, TaxMode, Tota
 
 /** Everything needed to render a quotation (HTML preview and PDF share this). */
 export interface QuotationView {
+  /** Logo width ÷ height, measured when rendering the PDF (lets wide logos use more width) */
+  logo_aspect?: number | null;
   quotation_no: string;
   is_draft_number: boolean;
   quotation_date: string;
@@ -88,3 +90,43 @@ export const footerFor = (v: Pick<QuotationView, "company" | "settings">) =>
   v.company.footer_text.trim() || v.settings.default_footer.trim();
 
 export const hasBankDetails = (c: Company) => Object.values(c.bank_details ?? {}).some((x) => String(x).trim());
+
+/** Number of small text lines under the company name in the header. */
+export function companyDetailLines(c: Company): number {
+  const title = companyTitle(c);
+  const legal = c.company_name.trim();
+  return (
+    companyAddressLines(c).length +
+    (companyContactLine(c) ? 1 : 0) +
+    (companyTaxLine(c) ? 1 : 0) +
+    (c.additional_info.trim() ? 1 : 0) +
+    (legal && legal.toLowerCase() !== title.toLowerCase() ? 1 : 0)
+  );
+}
+
+/**
+ * Sizes the header logo to the height of the company text block beside it.
+ * The width follows the logo's aspect ratio (wide logos get more room), capped at `maxWidthShare` of the row.
+ * Units are whatever the caller uses (pt for the PDF).
+ */
+export function headerLogoSize(
+  c: Company,
+  aspect: number | null | undefined,
+  o: { rowWidth: number; gap: number; nameSize: number; nameLineHeight: number; lineHeight: number; maxWidthShare?: number },
+): { width: number; height: number } {
+  const title = companyTitle(c);
+  const ratio = aspect && Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  const maxW = o.rowWidth * (o.maxWidthShare ?? 0.34);
+  const details = companyDetailLines(c) * o.lineHeight;
+  let width = Math.min(maxW, 70 * ratio);
+  let blockH = 0;
+  // Two passes: the logo width changes how the name wraps, which changes the block height.
+  for (let pass = 0; pass < 2; pass++) {
+    const textW = o.rowWidth - width - o.gap;
+    const charsPerLine = Math.max(8, textW / (o.nameSize * 0.64)); // bold caps ≈ 0.64em each
+    const nameLines = Math.max(1, Math.ceil(title.length / charsPerLine));
+    blockH = Math.max(40, nameLines * o.nameSize * o.nameLineHeight + details);
+    width = Math.min(maxW, blockH * ratio);
+  }
+  return { width, height: Math.min(blockH, width / ratio) };
+}

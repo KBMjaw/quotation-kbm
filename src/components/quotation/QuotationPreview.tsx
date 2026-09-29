@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { prepareLogo, type PreparedLogo } from "@/lib/logoFit";
 import { amountInWords, formatAmount, formatDate, formatPct, formatQty, lineAmounts } from "@/lib/calc";
 import { GstSummaryTable, sum } from "./GstSummaryTable";
 import {
@@ -9,6 +11,7 @@ import {
   companyTitle,
   footerFor,
   hasBankDetails,
+  headerLogoSize,
   monogram,
   splitLines,
   termsFor,
@@ -27,6 +30,45 @@ export function CompanyLogo({ company, size = 64 }: { company: QuotationView["co
       style={{ width: size * 0.9, height: size * 0.9, background: brand, fontSize: m.length > 4 ? size * 0.17 : size * 0.24 }}
     >
       {m}
+    </span>
+  );
+}
+
+/** Header logo sized to the company text block, same rule as the PDF (px instead of pt). */
+function HeaderLogo({ company }: { company: QuotationView["company"] }) {
+  const [logo, setLogo] = useState<PreparedLogo | null>(null);
+  useEffect(() => {
+    let live = true;
+    setLogo(null);
+    if (company.logo_url) prepareLogo(company.logo_url).then((l) => live && setLogo(l));
+    return () => {
+      live = false;
+    };
+  }, [company.logo_url]);
+  const size = headerLogoSize(company, company.logo_url ? logo?.aspect : 1, {
+    rowWidth: 722, // 794px A4 width minus 36px side padding
+    gap: 16,
+    nameSize: 20,
+    nameLineHeight: 1.25,
+    lineHeight: 11 * 1.375,
+  });
+  if (!company.logo_url) {
+    const m = monogram(company);
+    return (
+      <span
+        className="flex shrink-0 items-center justify-center rounded-lg font-bold text-white"
+        style={{ width: size.width, height: size.height, background: company.brand_color || "#1F3A93", fontSize: size.height * (m.length > 4 ? 0.17 : 0.24) }}
+      >
+        {m}
+      </span>
+    );
+  }
+  return (
+    <span className="flex shrink-0 items-center justify-center" style={{ width: size.width, height: size.height, maxWidth: "34%" }} data-testid="header-logo">
+      {logo && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logo.src} alt={`${company.company_name} logo`} className="h-full w-full object-contain" />
+      )}
     </span>
   );
 }
@@ -53,9 +95,7 @@ export function QuotationPreview({ v }: { v: QuotationView }) {
         )}
         <div className="relative">
           <header className="flex items-center gap-4 border-b-2 pb-3" style={{ borderColor: brand }}>
-            <div className="flex h-[80px] w-[80px] shrink-0 items-center justify-center">
-              <CompanyLogo company={c} size={80} />
-            </div>
+            <HeaderLogo company={c} />
             <div className="min-w-0 flex-1">
               <h1 className="text-[20px] leading-tight font-bold" style={{ color: brand }}>
                 {title}

@@ -1,3 +1,5 @@
+import { trimToCanvas } from "./logoFit";
+
 export const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 
 /**
@@ -25,8 +27,10 @@ export async function logoToPng(file: File, maxSide = 600): Promise<Blob> {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Image processing is not supported in this browser.");
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    // Drop blank margins so the logo fills its space on the quotation.
+    const trimmed = trimToCanvas(canvas) ?? canvas;
     return await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not convert image."))), "image/png"),
+      trimmed.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not convert image."))), "image/png"),
     );
   } finally {
     URL.revokeObjectURL(url);

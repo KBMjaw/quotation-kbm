@@ -7,6 +7,7 @@ import {
   companyTitle,
   footerFor,
   hasBankDetails,
+  headerLogoSize,
   monogram,
   splitLines,
   termsFor,
@@ -30,6 +31,8 @@ export function registerFonts(origin: string) {
 }
 
 const INK = "#0f172a";
+const PAGE_CONTENT_WIDTH = 595.28 - 36 * 2; // A4 minus side padding
+const HEADER_GAP = 14;
 const MUTED = "#475569";
 const LINE = "#cbd5e1";
 const ZEBRA = "#f8fafc";
@@ -38,9 +41,8 @@ const s = StyleSheet.create({
   page: { fontFamily: "NotoSans", fontSize: 9, color: INK, paddingTop: 30, paddingBottom: 54, paddingHorizontal: 36, lineHeight: 1.35 },
   row: { flexDirection: "row" },
   header: { flexDirection: "row", alignItems: "center", paddingBottom: 10, borderBottomWidth: 2 },
-  logoBox: { width: 68, height: 68, marginRight: 14, alignItems: "center", justifyContent: "center" },
-  logo: { maxWidth: 68, maxHeight: 68, objectFit: "contain" },
-  mono: { width: 60, height: 60, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  logoBox: { marginRight: HEADER_GAP, alignItems: "center", justifyContent: "center" },
+  mono: { borderRadius: 8, alignItems: "center", justifyContent: "center" },
   monoText: { color: "#fff", fontWeight: 700 },
   coName: { fontSize: 16, fontWeight: 700, lineHeight: 1.2, marginBottom: 2 },
   coLegal: { fontSize: 8.5, color: MUTED, marginBottom: 2 },
@@ -100,6 +102,14 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
   const legal = c.company_name.trim();
   const terms = splitLines(termsFor(v));
   const footer = footerFor(v);
+  // Logo height matches the company text block; width follows the logo's proportions.
+  const logo = headerLogoSize(c, c.logo_url ? v.logo_aspect : 1, {
+    rowWidth: PAGE_CONTENT_WIDTH,
+    gap: HEADER_GAP,
+    nameSize: 16,
+    nameLineHeight: 1.2,
+    lineHeight: 8.5 * 1.35,
+  });
 
   // Tax columns follow the tax type: CGST + SGST (intra-state), IGST (inter-state) or none.
   const taxCols: Col[] =
@@ -136,12 +146,12 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
 
         {/* ---------- Company header ---------- */}
         <View style={[s.header, { borderBottomColor: brand }]}>
-          <View style={s.logoBox}>
+          <View style={[s.logoBox, { width: logo.width, height: logo.height }]}>
             {c.logo_url ? (
-              <Image src={c.logo_url} style={s.logo} />
+              <Image src={c.logo_url} style={{ width: logo.width, height: logo.height, objectFit: "contain" }} />
             ) : (
-              <View style={[s.mono, { backgroundColor: brand }]}>
-                <Text style={[s.monoText, { fontSize: monogram(c).length > 4 ? 11 : 15 }]}>{monogram(c)}</Text>
+              <View style={[s.mono, { backgroundColor: brand, width: logo.width, height: logo.height }]}>
+                <Text style={[s.monoText, { fontSize: logo.height * (monogram(c).length > 4 ? 0.17 : 0.24) }]}>{monogram(c)}</Text>
               </View>
             )}
           </View>

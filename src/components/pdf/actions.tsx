@@ -1,9 +1,15 @@
 import { pdf } from "@react-pdf/renderer";
+import { prepareLogo } from "@/lib/logoFit";
 import type { QuotationView } from "@/lib/view";
 import { QuotationDocument, registerFonts } from "./QuotationPdf";
 
 export async function renderPdf(v: QuotationView): Promise<Blob> {
   registerFonts(window.location.origin);
+  // Use the margin-trimmed logo and its real proportions so it can be sized to the header text.
+  if (v.company.logo_url) {
+    const logo = await prepareLogo(v.company.logo_url);
+    v = { ...v, company: { ...v.company, logo_url: logo.src }, logo_aspect: logo.aspect };
+  }
   return pdf(<QuotationDocument v={v} />).toBlob();
 }
 
