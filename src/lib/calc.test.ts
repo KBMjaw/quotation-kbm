@@ -4,7 +4,7 @@ import type { QuotationItem } from "./types";
 
 const item = (p: Partial<QuotationItem>): QuotationItem => ({
   id: "x", material_id: null, material_name: "M", description: "", hsn_code: "", quantity: 1, unit_id: null,
-  unit_code: "MT", unit_name: "", rate: 0, discount_pct: 0, gst_rate: 0, ...p,
+  unit_code: "MT", unit_name: "", rate: 0, discount_pct: 0, gst_rate: 0, gst_overridden: false, ...p,
 });
 
 describe("totals", () => {
@@ -27,13 +27,17 @@ describe("totals", () => {
       { label: "IGST", rate: 5, amount: 13.5 },
       { label: "IGST", rate: 18, amount: 180 },
     ]);
+    expect(t.gst_summary).toEqual([
+      { rate: 5, taxable: 270, cgst: 0, sgst: 0, igst: 13.5, tax: 13.5 },
+      { rate: 18, taxable: 1000, cgst: 0, sgst: 0, igst: 180, tax: 180 },
+    ]);
     expect(t.grand_total).toBe(1463.5);
     expect(t.round_off).toBe(0);
   });
 
   it("rounds the grand total and records the round-off", () => {
     const t = computeTotals([item({ quantity: 3, rate: 33.2, gst_rate: 5 })], "CGST_SGST");
-    // 99.60 + 2.49 + 2.49 = 104.58 -> 105
+    // 99.60 + CGST 2.49 + SGST 2.49 = 104.58 -> 105
     expect(t.grand_total).toBe(105);
     expect(t.round_off).toBe(0.42);
   });

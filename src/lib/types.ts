@@ -14,6 +14,9 @@ export interface UnitType extends Timestamps {
   is_active: boolean;
 }
 
+/** GST = taxable at gst_rate; EXEMPT = always 0% (nil-rated / exempt supply) */
+export type MaterialTaxType = "GST" | "EXEMPT";
+
 export interface Material extends Timestamps {
   id: ID;
   name: string;
@@ -24,6 +27,9 @@ export interface Material extends Timestamps {
   /** Units this material can be quoted in. Empty = any active unit. */
   unit_ids: ID[];
   default_rate: number | null;
+  /** Product-specific GST %, copied onto quotation lines when the material is picked */
+  gst_rate: number;
+  tax_type: MaterialTaxType;
   is_active: boolean;
 }
 
@@ -105,7 +111,10 @@ export interface QuotationItem {
   unit_name: string;
   rate: number;
   discount_pct: number;
+  /** GST % saved with the line; old quotations keep it even if the material's rate changes later */
   gst_rate: number;
+  /** True when an authorised user replaced the material's configured GST rate */
+  gst_overridden: boolean;
 }
 
 export interface TaxLine {
@@ -114,12 +123,23 @@ export interface TaxLine {
   amount: number;
 }
 
+/** Taxable value and GST for one GST rate (CGST/SGST or IGST columns depend on the tax mode) */
+export interface GstSummaryRow {
+  rate: number;
+  taxable: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  tax: number;
+}
+
 export interface Totals {
   subtotal: number;
   discount_total: number;
   taxable_total: number;
   tax_total: number;
   tax_lines: TaxLine[];
+  gst_summary: GstSummaryRow[];
   round_off: number;
   grand_total: number;
 }

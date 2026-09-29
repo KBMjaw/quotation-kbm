@@ -1,68 +1,7 @@
-import type { QuotationItem, TaxLine, TaxMode, Totals, UnitType } from "./types";
+import type { UnitType } from "./types";
+import { round2 } from "./tax";
 
-export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-
-export interface LineAmounts {
-  gross: number;
-  discount: number;
-  taxable: number;
-  tax: number;
-  total: number;
-}
-
-export function lineAmounts(item: Pick<QuotationItem, "quantity" | "rate" | "discount_pct" | "gst_rate">): LineAmounts {
-  const qty = Number.isFinite(item.quantity) ? item.quantity : 0;
-  const rate = Number.isFinite(item.rate) ? item.rate : 0;
-  const gross = round2(qty * rate);
-  const discount = round2((gross * (item.discount_pct || 0)) / 100);
-  const taxable = round2(gross - discount);
-  const tax = round2((taxable * (item.gst_rate || 0)) / 100);
-  return { gross, discount, taxable, tax, total: round2(taxable + tax) };
-}
-
-export function computeTotals(items: QuotationItem[], taxMode: TaxMode, roundOff = true): Totals {
-  let subtotal = 0;
-  let discount_total = 0;
-  let taxable_total = 0;
-  const byRate = new Map<number, number>();
-
-  for (const item of items) {
-    const a = lineAmounts(item);
-    subtotal += a.gross;
-    discount_total += a.discount;
-    taxable_total += a.taxable;
-    if (taxMode !== "NONE" && item.gst_rate > 0) {
-      byRate.set(item.gst_rate, (byRate.get(item.gst_rate) ?? 0) + a.taxable);
-    }
-  }
-
-  const tax_lines: TaxLine[] = [];
-  const rates = [...byRate.keys()].sort((a, b) => a - b);
-  for (const rate of rates) {
-    const base = byRate.get(rate)!;
-    if (taxMode === "CGST_SGST") {
-      const half = round2((base * rate) / 200);
-      tax_lines.push({ label: "CGST", rate: rate / 2, amount: half });
-      tax_lines.push({ label: "SGST", rate: rate / 2, amount: half });
-    } else {
-      tax_lines.push({ label: "IGST", rate, amount: round2((base * rate) / 100) });
-    }
-  }
-
-  const tax_total = round2(tax_lines.reduce((s, t) => s + t.amount, 0));
-  const exact = round2(taxable_total + tax_total);
-  const grand_total = roundOff ? Math.round(exact) : exact;
-
-  return {
-    subtotal: round2(subtotal),
-    discount_total: round2(discount_total),
-    taxable_total: round2(taxable_total),
-    tax_total,
-    tax_lines,
-    round_off: round2(grand_total - exact),
-    grand_total,
-  };
-}
+export { computeTotals, lineAmounts, round2, type LineAmounts } from "./tax";
 
 const inrFormatter = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyFormatter = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 });

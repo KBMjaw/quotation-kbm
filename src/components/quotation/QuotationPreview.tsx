@@ -1,6 +1,7 @@
 "use client";
 
 import { amountInWords, formatAmount, formatDate, formatPct, formatQty, lineAmounts } from "@/lib/calc";
+import { GstSummaryTable } from "./GstSummaryTable";
 import {
   companyAddressLines,
   companyContactLine,
@@ -105,53 +106,62 @@ export function QuotationPreview({ v }: { v: QuotationView }) {
             </p>
           )}
 
-          <table className="w-full border-collapse text-[11px]">
+          <table className="w-full border-collapse text-[10.5px]" data-testid="preview-items">
             <thead>
               <tr className="text-white" style={{ background: brand }}>
-                <th className="w-7 px-1 py-1.5 text-center">#</th>
-                <th className="px-1.5 py-1.5 text-left">Material / Description</th>
-                {showHsn && <th className="w-14 px-1 py-1.5 text-center">HSN</th>}
-                <th className="w-16 px-1.5 py-1.5 text-right">Qty</th>
-                <th className="w-12 px-1 py-1.5 text-center">Unit</th>
-                <th className="w-20 px-1.5 py-1.5 text-right">Rate (₹)</th>
-                {showDisc && <th className="w-12 px-1.5 py-1.5 text-right">Disc.</th>}
-                {showGst && <th className="w-11 px-1.5 py-1.5 text-right">GST</th>}
-                <th className="w-24 px-1.5 py-1.5 text-right">Amount (₹)</th>
+                <th className="w-7 px-1 py-1.5 text-center">S.No</th>
+                <th className="px-1.5 py-1.5 text-left">Product</th>
+                <th className="w-14 px-1.5 py-1.5 text-right">Qty</th>
+                <th className="w-11 px-1 py-1.5 text-center">Unit</th>
+                <th className="w-[70px] px-1.5 py-1.5 text-right">Rate</th>
+                {showDisc && <th className="w-11 px-1.5 py-1.5 text-right">Disc.</th>}
+                <th className="w-20 px-1.5 py-1.5 text-right">{showGst ? "Taxable Value" : "Amount"}</th>
+                {showGst && <th className="w-11 px-1.5 py-1.5 text-right">GST %</th>}
+                {showGst && <th className="w-[70px] px-1.5 py-1.5 text-right">GST Amt</th>}
+                {showGst && <th className="w-20 px-1.5 py-1.5 text-right">Total</th>}
               </tr>
             </thead>
             <tbody>
               {v.items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-6 text-center text-slate-400">No materials added yet</td>
+                  <td colSpan={10} className="py-6 text-center text-slate-400">No materials added yet</td>
                 </tr>
               )}
               {v.items.map((it, i) => {
-                const a = lineAmounts(it);
+                const a = lineAmounts(it, v.tax_mode);
                 const desc = it.description.trim().toLowerCase() !== it.material_name.trim().toLowerCase() ? it.description.trim() : "";
                 return (
                   <tr key={it.id || i} className={i % 2 ? "bg-slate-50" : ""} style={{ borderBottom: "1px solid #cbd5e1" }}>
                     <td className="px-1 py-1.5 text-center align-top">{i + 1}</td>
                     <td className="px-1.5 py-1.5 align-top">
                       <b>{it.material_name || "—"}</b>
-                      {desc && <div className="text-[10px] text-slate-500">{desc}</div>}
+                      {desc && <div className="text-[9.5px] text-slate-500">{desc}</div>}
+                      {showHsn && it.hsn_code && <div className="text-[9.5px] text-slate-500">HSN: {it.hsn_code}</div>}
                     </td>
-                    {showHsn && <td className="px-1 py-1.5 text-center align-top">{it.hsn_code}</td>}
                     <td className="px-1.5 py-1.5 text-right align-top">{formatQty(it.quantity)}</td>
                     <td className="px-1 py-1.5 text-center align-top">{it.unit_code}</td>
                     <td className="px-1.5 py-1.5 text-right align-top">{formatAmount(it.rate)}</td>
                     {showDisc && <td className="px-1.5 py-1.5 text-right align-top">{it.discount_pct ? formatPct(it.discount_pct) : "-"}</td>}
-                    {showGst && <td className="px-1.5 py-1.5 text-right align-top">{formatPct(it.gst_rate)}</td>}
                     <td className="px-1.5 py-1.5 text-right align-top">{formatAmount(a.taxable)}</td>
+                    {showGst && <td className="px-1.5 py-1.5 text-right align-top">{formatPct(it.gst_rate)}</td>}
+                    {showGst && <td className="px-1.5 py-1.5 text-right align-top">{formatAmount(a.tax)}</td>}
+                    {showGst && <td className="px-1.5 py-1.5 text-right align-top font-semibold">{formatAmount(a.total)}</td>}
                   </tr>
                 );
               })}
             </tbody>
           </table>
 
-          <div className="mt-3 flex gap-3">
-            <div className="flex-1">
+          <div className="mt-3 flex gap-4">
+            <div className="min-w-0 flex-1 space-y-2.5">
+              {showGst && v.totals.gst_summary.length > 0 && (
+                <div>
+                  <p className="mb-0.5 text-[9px] font-bold tracking-wider text-slate-500">GST SUMMARY</p>
+                  <GstSummaryTable totals={v.totals} taxMode={v.tax_mode} />
+                </div>
+              )}
               {v.settings.show_amount_in_words && (
-                <div className="mb-2">
+                <div>
                   <p className="text-[9px] font-bold tracking-wider text-slate-500">AMOUNT IN WORDS</p>
                   <p className="font-semibold">{amountInWords(v.totals.grand_total)}</p>
                 </div>
@@ -167,13 +177,14 @@ export function QuotationPreview({ v }: { v: QuotationView }) {
                 </div>
               )}
             </div>
-            <div className="w-[260px] text-[11.5px]">
-              <TotRow k="Sub Total" v={v.totals.subtotal} />
+            <div className="w-[250px] shrink-0 text-[11.5px]">
+              {v.totals.discount_total > 0 && <TotRow k="Sub Total" v={v.totals.subtotal} />}
               {v.totals.discount_total > 0 && <TotRow k="Less: Discount" v={-v.totals.discount_total} />}
-              {v.totals.discount_total > 0 && <TotRow k="Taxable Value" v={v.totals.taxable_total} />}
+              <TotRow k="Taxable Value" v={v.totals.taxable_total} />
               {v.totals.tax_lines.map((t, i) => (
                 <TotRow key={i} k={`${t.label} @ ${formatPct(t.rate)}`} v={t.amount} />
               ))}
+              {showGst && <TotRow k="Total GST" v={v.totals.tax_total} bold />}
               {v.totals.round_off !== 0 && <TotRow k="Round Off" v={v.totals.round_off} />}
               <div className="mt-1 flex justify-between rounded px-2 py-1.5 text-[13px] font-bold text-white" style={{ background: brand }}>
                 <span>Grand Total</span>
@@ -226,9 +237,9 @@ function MetaRow({ k, v }: { k: string; v: string }) {
   );
 }
 
-function TotRow({ k, v }: { k: string; v: number }) {
+function TotRow({ k, v, bold }: { k: string; v: number; bold?: boolean }) {
   return (
-    <div className="flex justify-between px-2 py-0.5">
+    <div className={`flex justify-between px-2 py-0.5 ${bold ? "font-semibold" : ""}`}>
       <span className="text-slate-500">{k}</span>
       <span>{v < 0 ? `- ${formatAmount(-v)}` : formatAmount(v)}</span>
     </div>

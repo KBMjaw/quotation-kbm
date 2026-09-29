@@ -1,4 +1,4 @@
-import { computeTotals } from "../calc";
+import { computeTotals, materialGstRate, round2 } from "../tax";
 import { formatQuotationNumber } from "../numbering";
 import type {
   Company,
@@ -7,6 +7,7 @@ import type {
   MaterialInput,
   Quotation,
   QuotationInput,
+  QuotationItem,
   QuotationSettings,
   UnitInput,
   UnitType,
@@ -129,6 +130,8 @@ export class Repo {
       code: input.code.trim().toUpperCase(),
       description: input.description.trim(),
       hsn_code: input.hsn_code.trim(),
+      tax_type: input.tax_type === "EXEMPT" ? "EXEMPT" : "GST",
+      gst_rate: input.tax_type === "EXEMPT" ? 0 : round2(Number(input.gst_rate)),
       // The default unit is always one of the available units.
       unit_ids: default_unit_id && unit_ids.length && !unit_ids.includes(default_unit_id) ? [default_unit_id, ...unit_ids] : unit_ids,
       default_unit_id,
@@ -176,7 +179,14 @@ export class Repo {
     return formatQuotationNumber(s.number_format, company.quotation_prefix, company.next_number, s.seq_padding, dateISO);
   }
 
-  async saveQuotation(input: QuotationInput): Promise<Quotation> {
+  /**
+   * Saves a quotation. Line GST comes from configuration, not from the form:
+   *  - a normal line uses the material's configured GST rate, or the rate it was previously
+   *    saved with (so old quotations keep the GST that applied when they were created);
+   *  - an overridden rate is accepted only from users allowed to override GST
+   *    (an override saved earlier by such a user is preserved on later edits).
+   */
+  async saveQuotation(input: QuotationInput, opts: { canOverrideGst?: boolean } = {}): Promise<Quotation> {
     const [companies, materials, settings] = await Promise.all([
       this.b.listCompanies(),
       this.b.listMaterials(),
@@ -191,6 +201,14 @@ export class Repo {
       previousCompanyId: prev?.company_id,
     });
     if (hasErrors(errors)) throw new ValidationError(errors);
+
+    const gstErrors: Record<string, string> = {};
+    const items = input.items.map((it, i) =>
+      resolveLineGst(it, materials, prev?.items.find((p) => p.id === it.id), !!opts.canOverrideGst, (msg) => {
+        gstErrors[`items.${i}.gst`] = msg;
+      }),
+    );
+    if (hasErrors(gstErrors)) throw new ValidationError(gstErrors);
 
     const company = companies.find((c) => c.id === input.company_id);
     if (!company) throw new ValidationError({ company_id: "Company not found" });
@@ -216,8 +234,8 @@ export class Repo {
       quotation_no,
       seq,
       company_snapshot: { ...company, next_number: company.next_number },
-      items: input.items.map((it) => ({ ...it, id: it.id || newId() })),
-      totals: computeTotals(input.items, input.tax_mode, settings.round_off_total),
+      items: items.map((it) => ({ ...it, id: it.id || newId() })),
+      totals: computeTotals(items, input.tax_mode, settings.round_off_total),
       created_at: prev?.created_at ?? ts,
       updated_at: ts,
     };
@@ -227,4 +245,29 @@ export class Repo {
   deleteQuotation(id: string) {
     return this.b.removeQuotation(id);
   }
+}
+
+function resolveLineGst(
+  it: QuotationItem,
+  materials: Material[],
+  prevLine: QuotationItem | undefined,
+  canOverride: boolean,
+  fail: (msg: string) => void,
+): QuotationItem {
+  const material = materials.find((m) => m.id === it.material_id);
+  const sameAsSaved = !!prevLine && prevLine.material_id === it.material_id;
+
+  if (it.gst_overridden) {
+    const unchanged = sameAsSaved && prevLine!.gst_overridden && prevLine!.gst_rate === it.gst_rate;
+    if (!canOverride && !unchanged) fail("Only authorised users can override GST");
+    return it;
+  }
+  // Material deleted since the line was saved: keep what was saved.
+  if (!material) return { ...it, gst_rate: sameAsSaved ? prevLine!.gst_rate : it.gst_rate };
+
+  const current = materialGstRate(material);
+  const saved = sameAsSaved && !prevLine!.gst_overridden ? prevLine!.gst_rate : undefined;
+  // Accept the saved rate (historical) or the current configured rate; anything else is reset.
+  const gst_rate = it.gst_rate === saved || it.gst_rate === current ? it.gst_rate : current;
+  return { ...it, gst_rate, gst_overridden: false };
 }

@@ -25,7 +25,7 @@ async function draft(companyName = "Kannan Blue Metals"): Promise<QuotationInput
   const psand = materials.find((m) => m.name === "P Sand Dry")!;
   const mt = units.find((u) => u.code === "MT")!;
   const m3 = units.find((u) => u.code === "M3")!;
-  const base = { description: "", hsn_code: "", discount_pct: 0, gst_rate: 18 };
+  const base = { description: "", hsn_code: "", discount_pct: 0, gst_rate: 5, gst_overridden: false };
   return {
     company_id: c.id, company_snapshot: null, quotation_date: "2026-09-29", valid_until: null, reference: "", subject: "",
     customer: { ...emptyCustomer(), name: "ABC Constructions" },
@@ -47,6 +47,18 @@ describe("seed data", () => {
     expect(await again.listCompanies()).toHaveLength(3);
     expect(await again.listUnits()).toHaveLength(4);
   });
+  it("stores the supplied GSTINs and leaves Kannan Ready Mix Concrete blank", async () => {
+    const byName = Object.fromEntries((await repo.listCompanies()).map((c) => [c.company_name, c.gstin]));
+    expect(byName["Kannan Blue Metals"]).toBe("33ACCPC2634C1ZI");
+    expect(byName["Kannan Infra Projects India Private Limited"]).toBe("33AAJCK1677M1Z4");
+    expect(byName["Kannan Ready Mix Concrete"]).toBe("");
+  });
+  it("seeds GST rates on materials", async () => {
+    expect((await repo.listMaterials()).map((m) => [m.name, m.gst_rate, m.tax_type])).toEqual([
+      ["Flyash", 5, "GST"],
+      ["P Sand Dry", 5, "GST"],
+    ]);
+  });
   it("gives materials their default units", async () => {
     const units = await repo.listUnits();
     const code = (id: string | null) => units.find((u) => u.id === id)?.code;
@@ -62,7 +74,8 @@ describe("quotations", () => {
     const b = await repo.saveQuotation(await draft());
     const c = await repo.saveQuotation(await draft("Kannan Ready Mix Concrete"));
     expect([a.quotation_no, b.quotation_no, c.quotation_no]).toEqual(["KBM-QTN-0001", "KBM-QTN-0002", "KRMC-QTN-0001"]);
-    expect(a.totals.grand_total).toBe(73160);
+    // Flyash and P Sand Dry are configured at 5%: 62,000 + 3,100
+    expect(a.totals.grand_total).toBe(65100);
     expect(a.company_snapshot?.company_name).toBe("Kannan Blue Metals");
   });
 
@@ -94,13 +107,13 @@ describe("master data rules", () => {
   it("prevents duplicate names and codes", async () => {
     await expect(repo.saveCompany({ ...(await repo.listCompanies())[0], id: undefined, company_name: "kannan blue metals" })).rejects.toBeInstanceOf(ValidationError);
     await expect(repo.saveUnit({ name: "Tonne", code: "mt", is_active: true })).rejects.toMatchObject({ errors: { code: expect.any(String) } });
-    await expect(repo.saveMaterial({ name: "FLYASH", code: "", description: "", hsn_code: "", default_unit_id: null, unit_ids: [], default_rate: null, is_active: true })).rejects.toBeInstanceOf(ValidationError);
+    await expect(repo.saveMaterial({ name: "FLYASH", code: "", description: "", hsn_code: "", default_unit_id: null, unit_ids: [], default_rate: null, gst_rate: 5, tax_type: "GST", is_active: true })).rejects.toBeInstanceOf(ValidationError);
   });
 
   it("adds a new unit and material that includes it", async () => {
     const bag = await repo.saveUnit({ name: "Bag", code: "bag", is_active: true });
     expect(bag.code).toBe("BAG");
-    const cement = await repo.saveMaterial({ name: "Cement", code: "", description: "", hsn_code: "2523", default_unit_id: bag.id, unit_ids: [], default_rate: 380, is_active: true });
+    const cement = await repo.saveMaterial({ name: "Cement", code: "", description: "", hsn_code: "2523", default_unit_id: bag.id, unit_ids: [], default_rate: 380, gst_rate: 18, tax_type: "GST", is_active: true });
     expect(cement.default_unit_id).toBe(bag.id);
     await expect(repo.deleteUnit(bag.id)).rejects.toBeInstanceOf(InUseError);
   });
@@ -113,4 +126,89 @@ describe("master data rules", () => {
     await repo.deleteUnit(pcs.id);
     expect((await repo.listUnits()).some((u) => u.code === "PCS")).toBe(false);
   });
+});
+
+describe("upgrading data saved before GST", () => {
+  it("adds GST rates to materials and GSTINs to blank seeded companies without overwriting", async () => {
+    const old = new MemKV();
+    const legacy = new Repo(new LocalBackend(old));
+    await legacy.listCompanies(); // creates the stored data
+    const raw = JSON.parse(old.getItem("kipipl-quotation-maker:v1")!);
+    for (const m of raw.materials) { delete m.gst_rate; delete m.tax_type; }
+    raw.companies[0].gstin = ""; // blank → filled
+    raw.companies[2].gstin = "33ABCDE1234F1Z5"; // admin-entered → kept
+    old.setItem("kipipl-quotation-maker:v1", JSON.stringify(raw));
+    const upgraded = new Repo(new LocalBackend(old));
+    expect((await upgraded.listMaterials()).every((m) => m.gst_rate === 5 && m.tax_type === "GST")).toBe(true);
+    const after = await upgraded.listCompanies();
+    expect(after[0].gstin).toBe("33ACCPC2634C1ZI");
+    expect(after[2].gstin).toBe("33ABCDE1234F1Z5");
+  });
+});
+
+describe("product-level GST on quotations", () => {
+  async function cementAndSand() {
+    const units = await repo.listUnits();
+    const pcs = units.find((u) => u.code === "PCS")!;
+    const m3 = units.find((u) => u.code === "M3")!;
+    const cement = await repo.saveMaterial({ name: "Cement", code: "", description: "", hsn_code: "2523", default_unit_id: pcs.id, unit_ids: [], default_rate: null, gst_rate: 18, tax_type: "GST", is_active: true });
+    const sand = (await repo.listMaterials()).find((m) => m.name === "P Sand Dry")!;
+    const d = await draft();
+    const base = { description: "", hsn_code: "", discount_pct: 0, gst_overridden: false };
+    d.items = [
+      { ...base, id: "", material_id: cement.id, material_name: "Cement", quantity: 10, unit_id: pcs.id, unit_code: "PCS", unit_name: "Piece", rate: 500, gst_rate: 0 },
+      { ...base, id: "", material_id: sand.id, material_name: "P Sand Dry", quantity: 10, unit_id: m3.id, unit_code: "M3", unit_name: "Cubic Meter", rate: 1200, gst_rate: 0 },
+    ];
+    return { d, cement, sand };
+  }
+
+  it("takes each line's GST from the material configuration (acceptance: 17,000 + 1,500 = 18,500)", async () => {
+    const { d } = await cementAndSand();
+    const q = await repo.saveQuotation(d); // form sent 0%, configuration wins
+    expect(q.items.map((i) => i.gst_rate)).toEqual([18, 5]);
+    expect(q.totals).toMatchObject({ taxable_total: 17000, tax_total: 1500, grand_total: 18500 });
+    expect(q.totals.gst_summary.map((r) => [r.rate, r.taxable, r.tax])).toEqual([[5, 12000, 600], [18, 5000, 900]]);
+  });
+
+  it("keeps the GST saved on old quotations after the material rate changes", async () => {
+    const { d, cement } = await cementAndSand();
+    const q = await repo.saveQuotation(d);
+    await repo.saveMaterial({ ...cement, gst_rate: 28 });
+    const reopened = (await repo.getQuotation(q.id))!;
+    expect(reopened.items[0].gst_rate).toBe(18);
+    const resaved = await repo.saveQuotation({ ...reopened, notes: "edited" });
+    expect(resaved.items[0].gst_rate).toBe(18);
+    // Explicitly applying the new rate is allowed
+    const updated = await repo.saveQuotation({ ...resaved, items: resaved.items.map((i, n) => (n === 0 ? { ...i, gst_rate: 28 } : i)) });
+    expect(updated.items[0].gst_rate).toBe(28);
+    // A new quotation uses the new rate
+    const fresh = await repo.saveQuotation((await cementAndSandAgain()).d);
+    expect(fresh.items[0].gst_rate).toBe(28);
+  });
+
+  it("allows GST overrides only for authorised users", async () => {
+    const { d } = await cementAndSand();
+    d.items[0] = { ...d.items[0], gst_rate: 12, gst_overridden: true };
+    await expect(repo.saveQuotation(d)).rejects.toMatchObject({ errors: { "items.0.gst": expect.any(String) } });
+    const q = await repo.saveQuotation(d, { canOverrideGst: true });
+    expect(q.items[0]).toMatchObject({ gst_rate: 12, gst_overridden: true });
+    // A normal user can still edit other fields of that quotation…
+    await expect(repo.saveQuotation({ ...q, notes: "ok" })).resolves.toMatchObject({ notes: "ok" });
+    // …but cannot change the overridden rate.
+    await expect(repo.saveQuotation({ ...q, items: q.items.map((i, n) => (n === 0 ? { ...i, gst_rate: 0 } : i)) })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("validates the material GST rate", async () => {
+    const f = (await repo.listMaterials())[0];
+    await expect(repo.saveMaterial({ ...f, gst_rate: 150 })).rejects.toMatchObject({ errors: { gst_rate: expect.any(String) } });
+    const exempt = await repo.saveMaterial({ ...f, tax_type: "EXEMPT", gst_rate: 18 });
+    expect(exempt.gst_rate).toBe(0);
+  });
+
+  async function cementAndSandAgain() {
+    const cement = (await repo.listMaterials()).find((m) => m.name === "Cement")!;
+    const d = await draft();
+    d.items = [{ ...d.items[0], id: "", material_id: cement.id, material_name: "Cement", gst_rate: 18 }];
+    return { d };
+  }
 });

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { lineAmounts } from "../calc";
 import { DEFAULT_SETTINGS, emptyBank } from "../defaults";
-import type { Company, Material, Quotation, QuotationItem, QuotationSettings, UnitType } from "../types";
+import type { Company, Material, Quotation, QuotationItem, QuotationSettings, TaxMode, UnitType } from "../types";
 import { ValidationError } from "../validation";
 import type { Backend, Usage } from "./backend";
 
@@ -66,6 +66,7 @@ function toQuotation(r: Row, items: Row[]): Quotation {
         rate: num(i.rate),
         discount_pct: num(i.discount_pct),
         gst_rate: num(i.gst_rate),
+        gst_overridden: Boolean(i.gst_overridden),
       })),
     tax_mode: r.tax_mode as Quotation["tax_mode"],
     terms_conditions: r.terms_conditions as string,
@@ -76,6 +77,7 @@ function toQuotation(r: Row, items: Row[]): Quotation {
       taxable_total: num(r.taxable_total),
       tax_total: num(r.tax_total),
       tax_lines: (r.tax_lines as Quotation["totals"]["tax_lines"]) ?? [],
+      gst_summary: (r.gst_summary as Quotation["totals"]["gst_summary"]) ?? [],
       round_off: num(r.round_off),
       grand_total: num(r.grand_total),
     },
@@ -85,23 +87,33 @@ function toQuotation(r: Row, items: Row[]): Quotation {
   };
 }
 
-const itemRow = (quotationId: string, it: QuotationItem, position: number): Row => ({
-  id: it.id,
-  quotation_id: quotationId,
-  position,
-  material_id: it.material_id,
-  material_name: it.material_name,
-  description: it.description,
-  hsn_code: it.hsn_code,
-  quantity: it.quantity,
-  unit_id: it.unit_id,
-  unit_code: it.unit_code,
-  unit_name: it.unit_name,
-  rate: it.rate,
-  discount_pct: it.discount_pct,
-  gst_rate: it.gst_rate,
-  amount: lineAmounts(it).taxable,
-});
+const itemRow = (quotationId: string, it: QuotationItem, position: number, taxMode: TaxMode): Row => {
+  const a = lineAmounts(it, taxMode);
+  return {
+    id: it.id,
+    quotation_id: quotationId,
+    position,
+    material_id: it.material_id,
+    material_name: it.material_name,
+    description: it.description,
+    hsn_code: it.hsn_code,
+    quantity: it.quantity,
+    unit_id: it.unit_id,
+    unit_code: it.unit_code,
+    unit_name: it.unit_name,
+    rate: it.rate,
+    discount_pct: it.discount_pct,
+    gst_rate: it.gst_rate,
+    gst_overridden: it.gst_overridden,
+    // Amounts are stored with the line so an old quotation shows exactly what was quoted.
+    amount: a.taxable,
+    cgst_amount: a.cgst,
+    sgst_amount: a.sgst,
+    igst_amount: a.igst,
+    gst_amount: a.tax,
+    line_total: a.total,
+  };
+};
 
 export class SupabaseBackend implements Backend {
   mode = "supabase" as const;
@@ -142,6 +154,8 @@ export class SupabaseBackend implements Backend {
     return rows.map(({ material_units, ...m }) => ({
       ...(m as unknown as Material),
       default_rate: m.default_rate == null ? null : Number(m.default_rate),
+      gst_rate: num(m.gst_rate),
+      tax_type: (m.tax_type === "EXEMPT" ? "EXEMPT" : "GST") as Material["tax_type"],
       unit_ids: ((material_units as { unit_id: string }[]) ?? []).map((x) => x.unit_id),
     }));
   }
@@ -211,9 +225,13 @@ export class SupabaseBackend implements Backend {
       status: q.status,
     };
     check(await this.sb.from("quotations").upsert(row), "quotation_no");
-    check(await this.sb.from("quotation_items").delete().eq("quotation_id", q.id));
+    // Upsert lines by id (the database keeps a line's saved GST rate unless its material changes),
+    // then drop lines that were removed.
+    const keep = q.items.map((it) => it.id);
+    const del = this.sb.from("quotation_items").delete().eq("quotation_id", q.id);
+    check(await (keep.length ? del.not("id", "in", `(${keep.join(",")})`) : del));
     if (q.items.length)
-      check(await this.sb.from("quotation_items").insert(q.items.map((it, i) => itemRow(q.id, it, i))));
+      check(await this.sb.from("quotation_items").upsert(q.items.map((it, i) => itemRow(q.id, it, i, q.tax_mode))));
     return (await this.getQuotation(q.id)) ?? q;
   }
   async removeQuotation(id: string) {

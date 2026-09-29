@@ -54,6 +54,8 @@ export function validateMaterial(input: MaterialInput, existing: Material[], uni
   if (input.unit_ids.some((id) => !unitIds.has(id))) e.unit_ids = "Unknown unit selected";
   if (input.default_unit_id && input.unit_ids.length && !input.unit_ids.includes(input.default_unit_id))
     e.default_unit_id = "Default unit must be one of the available units";
+  if (input.tax_type !== "EXEMPT" && (!Number.isFinite(input.gst_rate) || input.gst_rate < 0 || input.gst_rate > 100))
+    e.gst_rate = "GST rate must be between 0 and 100";
   if (input.default_rate != null && (!Number.isFinite(input.default_rate) || input.default_rate < 0))
     e.default_rate = "Rate must be a valid number";
   return e;

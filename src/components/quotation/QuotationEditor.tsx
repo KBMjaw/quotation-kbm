@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addDaysISO, computeTotals, formatAmount, formatPct, todayISO } from "@/lib/calc";
+import { gstinStateCode, materialGstRate, suggestTaxMode } from "@/lib/tax";
 import { emptyCustomer } from "@/lib/defaults";
 import { formatQuotationNumber } from "@/lib/numbering";
 import type { Company, Quotation, QuotationInput, QuotationSettings, TaxMode } from "@/lib/types";
@@ -11,6 +12,7 @@ import { ValidationError, type Errors } from "@/lib/validation";
 import { buildView, companyAddressLines, companyTitle } from "@/lib/view";
 import { useData } from "../DataProvider";
 import { Badge, Button, Card, Field, Input, Select, Textarea, cx, errorMessage, useToast } from "../ui";
+import { GstSummaryTable } from "./GstSummaryTable";
 import { ItemsEditor, newItem } from "./ItemsEditor";
 import { CompanyLogo, QuotationPreview } from "./QuotationPreview";
 
@@ -30,7 +32,7 @@ function blankForm(company: Company | undefined, settings: QuotationSettings): F
     reference: "",
     subject: "",
     customer: emptyCustomer(),
-    items: [newItem(settings.default_gst_rate)],
+    items: [newItem()],
     tax_mode: settings.default_tax_mode,
     terms_conditions: defaultTermsFor(company, settings),
     notes: "",
@@ -46,7 +48,7 @@ function fromQuotation(q: Quotation): Form {
 const LAST_COMPANY_KEY = "kipipl-qm:last-company";
 
 export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation; duplicateOf?: Quotation }) {
-  const { repo, companies, materials, units, settings, refresh } = useData();
+  const { repo, companies, materials, units, settings, refresh, isAdmin } = useData();
   const router = useRouter();
   const toast = useToast();
 
@@ -65,7 +67,18 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
         ...base,
         company_id: d.company_id,
         customer: d.customer,
-        items: d.items.map((it) => ({ ...newItem(0), ...it, id: newItem(0).id })),
+        // A new quotation uses today's GST configuration; admin overrides carry over only for admins.
+        items: d.items.map((it) => {
+          const m = materials.find((x) => x.id === it.material_id);
+          const keepOverride = it.gst_overridden && isAdmin;
+          return {
+            ...newItem(),
+            ...it,
+            id: newItem().id,
+            gst_overridden: keepOverride,
+            gst_rate: keepOverride || !m ? it.gst_rate : materialGstRate(m),
+          };
+        }),
         tax_mode: d.tax_mode,
         terms_conditions: d.terms_conditions,
         subject: d.subject,
@@ -109,7 +122,14 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
   const totals = useMemo(() => computeTotals(form.items, form.tax_mode, settings.round_off_total), [form.items, form.tax_mode, settings.round_off_total]);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const setCustomer = (k: keyof Form["customer"], v: string) => setForm((f) => ({ ...f, customer: { ...f.customer, [k]: v } }));
+  const setCustomer = (k: keyof Form["customer"], v: string) =>
+    setForm((f) => {
+      const next = { ...f, customer: { ...f.customer, [k]: v } };
+      if (k !== "gstin" || f.tax_mode === "NONE") return next;
+      const c = companies.find((x) => x.id === f.company_id);
+      const suggested = c ? suggestTaxMode(c.gstin, v) : null;
+      return suggested ? { ...next, tax_mode: suggested } : next;
+    });
 
   const selectCompany = (id: string) => {
     const next = companies.find((c) => c.id === id);
@@ -117,7 +137,13 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
       const prev = companies.find((c) => c.id === f.company_id);
       // Only swap terms if the user hasn't customised them for this quotation.
       const termsUntouched = !f.terms_conditions.trim() || f.terms_conditions === defaultTermsFor(prev, settings);
-      return { ...f, company_id: id, terms_conditions: termsUntouched ? defaultTermsFor(next, settings) : f.terms_conditions };
+      const suggested = next && f.tax_mode !== "NONE" ? suggestTaxMode(next.gstin, f.customer.gstin) : null;
+      return {
+        ...f,
+        company_id: id,
+        terms_conditions: termsUntouched ? defaultTermsFor(next, settings) : f.terms_conditions,
+        tax_mode: suggested ?? f.tax_mode,
+      };
     });
     try {
       localStorage.setItem(LAST_COMPANY_KEY, id);
@@ -132,7 +158,7 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
   const save = async (): Promise<Quotation | null> => {
     setBusy("save");
     try {
-      const saved = await repo.saveQuotation(form);
+      const saved = await repo.saveQuotation(form, { canOverrideGst: isAdmin });
       const f = fromQuotation(saved);
       savedJson.current = JSON.stringify(f);
       setForm(f);
@@ -340,6 +366,9 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
               <Field label="Subject">
                 <Input value={form.subject} onChange={(e) => set("subject", e.target.value)} placeholder="Quotation for supply of…" />
               </Field>
+              <Field label="Tax Type" hint={taxHint(company?.gstin ?? "", form.customer.gstin)}>
+                <TaxTypeSelect value={form.tax_mode} onChange={(v) => set("tax_mode", v)} />
+              </Field>
               <Field label="Status">
                 <Select value={form.status} onChange={(e) => set("status", e.target.value as Form["status"])}>
                   <option value="draft">Draft</option>
@@ -360,11 +389,7 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
             title="Materials"
             className="lg:col-span-2"
             actions={
-              <Select value={form.tax_mode} onChange={(e) => set("tax_mode", e.target.value as TaxMode)} className="w-auto py-1.5 text-xs" aria-label="Tax type">
-                <option value="CGST_SGST">GST: CGST + SGST (within state)</option>
-                <option value="IGST">GST: IGST (other state)</option>
-                <option value="NONE">No GST</option>
-              </Select>
+              <TaxTypeSelect value={form.tax_mode} onChange={(v) => set("tax_mode", v)} className="w-auto py-1.5 text-xs" />
             }
           >
             <ItemsEditor
@@ -372,8 +397,8 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
               onChange={(items) => set("items", items)}
               materials={materials}
               units={units}
-              defaultGst={settings.default_gst_rate}
-              showGst={form.tax_mode !== "NONE"}
+              taxMode={form.tax_mode}
+              canOverrideGst={isAdmin}
               errors={errors}
             />
             <p className="mt-3 text-xs text-slate-500">
@@ -381,7 +406,7 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
             </p>
           </Card>
           <div className="space-y-5">
-            <TotalsCard totals={totals} />
+            <TotalsCard totals={totals} taxMode={form.tax_mode} />
             <Card title="Terms & Notes">
               <div className="grid gap-3">
                 <Field label="Terms & Conditions" hint="One term per line">
@@ -401,7 +426,7 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
         <div className="grid gap-5 xl:grid-cols-[1fr_300px]">
           <div>{view ? <QuotationPreview v={view} /> : <Card><p className="text-sm text-slate-500">Select a company to preview.</p></Card>}</div>
           <div className="space-y-5">
-            <TotalsCard totals={totals} />
+            <TotalsCard totals={totals} taxMode={form.tax_mode} />
             <Card title="Next steps">
               <div className="grid gap-2">
                 <Button onClick={onSave} disabled={!!busy}>{busy === "save" ? "Saving…" : "Save Quotation"}</Button>
@@ -434,31 +459,65 @@ export function QuotationEditor({ initial, duplicateOf }: { initial?: Quotation;
   );
 }
 
-function TotalsCard({ totals }: { totals: ReturnType<typeof computeTotals> }) {
+function TotalsCard({ totals, taxMode }: { totals: ReturnType<typeof computeTotals>; taxMode: TaxMode }) {
   return (
     <Card title="Totals">
       <dl className="space-y-1.5 text-sm" data-testid="totals">
-        <Row k="Sub Total" v={totals.subtotal} />
+        {totals.discount_total > 0 && <Row k="Sub Total" v={totals.subtotal} />}
         {totals.discount_total > 0 && <Row k="Discount" v={-totals.discount_total} />}
-        {totals.discount_total > 0 && <Row k="Taxable Value" v={totals.taxable_total} />}
+        <Row k="Taxable Value" v={totals.taxable_total} testId="taxable-total" />
         {totals.tax_lines.map((t, i) => (
           <Row key={i} k={`${t.label} @ ${formatPct(t.rate)}`} v={t.amount} />
         ))}
+        {taxMode !== "NONE" && <Row k="Total GST" v={totals.tax_total} testId="gst-total" strong />}
         {totals.round_off !== 0 && <Row k="Round Off" v={totals.round_off} />}
         <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900">
           <dt>Grand Total</dt>
           <dd data-testid="grand-total">₹{formatAmount(totals.grand_total)}</dd>
         </div>
       </dl>
+      {taxMode !== "NONE" && totals.gst_summary.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">GST Summary</p>
+          <GstSummaryTable totals={totals} taxMode={taxMode} compact />
+        </div>
+      )}
     </Card>
   );
 }
 
-function Row({ k, v }: { k: string; v: number }) {
+const TAX_TYPES: { value: TaxMode; label: string }[] = [
+  { value: "CGST_SGST", label: "CGST + SGST (intra-state)" },
+  { value: "IGST", label: "IGST (inter-state)" },
+  { value: "NONE", label: "No GST" },
+];
+
+function TaxTypeSelect({ value, onChange, className }: { value: TaxMode; onChange: (v: TaxMode) => void; className?: string }) {
   return (
-    <div className="flex justify-between text-slate-600">
+    <Select value={value} onChange={(e) => onChange(e.target.value as TaxMode)} className={className} aria-label="Tax type">
+      {TAX_TYPES.map((t) => (
+        <option key={t.value} value={t.value}>{t.label}</option>
+      ))}
+    </Select>
+  );
+}
+
+/** Explains the automatic choice made from the GSTIN state codes. */
+function taxHint(companyGstin: string, customerGstin: string): string {
+  const a = gstinStateCode(companyGstin);
+  const b = gstinStateCode(customerGstin);
+  if (!a) return "Company GSTIN not set: choose the tax type manually.";
+  if (!b) return "Enter the customer GSTIN to pick CGST+SGST or IGST automatically.";
+  return a === b
+    ? `Same state (${a}): CGST + SGST applied automatically.`
+    : `Different states (${a} → ${b}): IGST applied automatically.`;
+}
+
+function Row({ k, v, testId, strong }: { k: string; v: number; testId?: string; strong?: boolean }) {
+  return (
+    <div className={cx("flex justify-between", strong ? "font-medium text-slate-800" : "text-slate-600")}>
       <dt>{k}</dt>
-      <dd>{v < 0 ? `- ₹${formatAmount(-v)}` : `₹${formatAmount(v)}`}</dd>
+      <dd data-testid={testId}>{v < 0 ? `- ₹${formatAmount(-v)}` : `₹${formatAmount(v)}`}</dd>
     </div>
   );
 }

@@ -56,14 +56,18 @@ const s = StyleSheet.create({
   metaKey: { width: 72, color: MUTED },
   metaVal: { flex: 1, fontWeight: 700, textAlign: "right" },
   subject: { marginBottom: 8 },
-  th: { flexDirection: "row", color: "#fff", fontWeight: 700, fontSize: 8 },
-  tr: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: LINE },
+  th: { flexDirection: "row", color: "#fff", fontWeight: 700, fontSize: 7.5, alignItems: "center" },
+  tr: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: LINE, fontSize: 8.5 },
   cell: { paddingVertical: 5, paddingHorizontal: 4 },
   right: { textAlign: "right" },
   center: { textAlign: "center" },
   desc: { fontSize: 7.5, color: MUTED, marginTop: 1 },
   bottom: { flexDirection: "row", marginTop: 10 },
   words: { fontSize: 8.5, fontWeight: 700, marginBottom: 8 },
+  gsTable: { borderWidth: 0.75, borderColor: LINE, borderRadius: 3, marginBottom: 8 },
+  gsHead: { flexDirection: "row", backgroundColor: "#f1f5f9", fontWeight: 700, fontSize: 7.5, color: MUTED },
+  gsRow: { flexDirection: "row", borderTopWidth: 0.5, borderTopColor: LINE, fontSize: 8 },
+  gsCell: { flex: 1, paddingVertical: 3, paddingHorizontal: 5, textAlign: "right" },
   totals: { width: 220, marginLeft: 12 },
   totRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3, paddingHorizontal: 8 },
   grand: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, paddingHorizontal: 8, color: "#fff", fontWeight: 700, fontSize: 10.5, marginTop: 2, borderRadius: 3 },
@@ -98,15 +102,20 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
   const footer = footerFor(v);
 
   const cols: Col[] = [
-    { key: "no", label: "#", width: 22, align: "center" },
-    { key: "item", label: "Material / Description", width: "flex" },
-    ...(showHsn ? [{ key: "hsn", label: "HSN", width: 44, align: "center" as const }] : []),
-    { key: "qty", label: "Qty", width: 50, align: "right" },
-    { key: "unit", label: "Unit", width: 40, align: "center" },
-    { key: "rate", label: "Rate (₹)", width: 64, align: "right" },
-    ...(showDisc ? [{ key: "disc", label: "Disc.", width: 36, align: "right" as const }] : []),
-    ...(showGst ? [{ key: "gst", label: "GST", width: 34, align: "right" as const }] : []),
-    { key: "amt", label: "Amount (₹)", width: 76, align: "right" },
+    { key: "no", label: "S.No", width: 26, align: "center" },
+    { key: "item", label: "Product", width: "flex" },
+    { key: "qty", label: "Qty", width: 40, align: "right" },
+    { key: "unit", label: "Unit", width: 32, align: "center" },
+    { key: "rate", label: "Rate (₹)", width: 54, align: "right" },
+    ...(showDisc ? [{ key: "disc", label: "Disc.", width: 32, align: "right" as const }] : []),
+    { key: "taxable", label: showGst ? "Taxable Value" : "Amount (₹)", width: 62, align: "right" },
+    ...(showGst
+      ? [
+          { key: "gst", label: "GST %", width: 32, align: "right" as const },
+          { key: "gstamt", label: "GST Amount", width: 54, align: "right" as const },
+          { key: "total", label: "Total (₹)", width: 64, align: "right" as const },
+        ]
+      : []),
   ];
   const colStyle = (col: Col) => [
     s.cell,
@@ -189,7 +198,7 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
             ))}
           </View>
           {v.items.map((it, i) => {
-            const a = lineAmounts(it);
+            const a = lineAmounts(it, v.tax_mode);
             const desc = it.description.trim() && it.description.trim().toLowerCase() !== it.material_name.trim().toLowerCase() ? it.description.trim() : "";
             const cells: Record<string, React.ReactNode> = {
               no: String(i + 1),
@@ -197,15 +206,17 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
                 <>
                   <Text style={{ fontWeight: 700 }}>{it.material_name}</Text>
                   {desc ? <Text style={s.desc}>{desc}</Text> : null}
+                  {showHsn && it.hsn_code ? <Text style={s.desc}>HSN: {it.hsn_code}</Text> : null}
                 </>
               ),
-              hsn: it.hsn_code,
               qty: formatQty(it.quantity),
               unit: it.unit_code,
               rate: formatAmount(it.rate),
               disc: it.discount_pct ? formatPct(it.discount_pct) : "-",
+              taxable: formatAmount(a.taxable),
               gst: formatPct(it.gst_rate),
-              amt: formatAmount(a.taxable),
+              gstamt: formatAmount(a.tax),
+              total: formatAmount(a.total),
             };
             return (
               <View key={it.id || i} style={[s.tr, i % 2 ? { backgroundColor: ZEBRA } : {}]} wrap={false}>
@@ -224,6 +235,7 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
         {/* ---------- Totals ---------- */}
         <View style={s.bottom} wrap={false}>
           <View style={{ flex: 1 }}>
+            {showGst && v.totals.gst_summary.length ? <GstSummary v={v} /> : null}
             {v.settings.show_amount_in_words ? (
               <View style={{ marginBottom: 8 }}>
                 <Text style={s.label}>AMOUNT IN WORDS</Text>
@@ -242,12 +254,13 @@ export function QuotationDocument({ v }: { v: QuotationView }) {
             ) : null}
           </View>
           <View style={s.totals}>
-            <Tot k="Sub Total" v={v.totals.subtotal} />
+            {v.totals.discount_total ? <Tot k="Sub Total" v={v.totals.subtotal} /> : null}
             {v.totals.discount_total ? <Tot k="Less: Discount" v={-v.totals.discount_total} /> : null}
-            {v.totals.discount_total ? <Tot k="Taxable Value" v={v.totals.taxable_total} /> : null}
+            <Tot k="Taxable Value" v={v.totals.taxable_total} />
             {v.totals.tax_lines.map((t, i) => (
               <Tot key={i} k={`${t.label} @ ${formatPct(t.rate)}`} v={t.amount} />
             ))}
+            {showGst ? <Tot k="Total GST" v={v.totals.tax_total} bold /> : null}
             {v.totals.round_off ? <Tot k="Round Off" v={v.totals.round_off} /> : null}
             <View style={[s.grand, { backgroundColor: brand }]}>
               <Text>Grand Total</Text>
@@ -306,10 +319,10 @@ function Meta({ k, v }: { k: string; v: string }) {
   );
 }
 
-function Tot({ k, v }: { k: string; v: number }) {
+function Tot({ k, v, bold }: { k: string; v: number; bold?: boolean }) {
   return (
-    <View style={s.totRow}>
-      <Text style={{ color: MUTED }}>{k}</Text>
+    <View style={[s.totRow, bold ? { fontWeight: 700 } : {}]}>
+      <Text style={bold ? {} : { color: MUTED }}>{k}</Text>
       <Text>{v < 0 ? `- ${formatAmount(-v)}` : formatAmount(v)}</Text>
     </View>
   );
@@ -320,6 +333,51 @@ function Bank({ k, v }: { k: string; v: string }) {
     <View style={s.row}>
       <Text style={{ width: 52, color: MUTED }}>{k}</Text>
       <Text style={{ flex: 1 }}>{v}</Text>
+    </View>
+  );
+}
+
+/** GST grouped by rate (CGST/SGST columns intra-state, IGST inter-state). */
+function GstSummary({ v }: { v: QuotationView }) {
+  const split = v.tax_mode === "CGST_SGST";
+  const t = v.totals;
+  const total = (k: "cgst" | "sgst" | "igst") => t.gst_summary.reduce((acc, r) => acc + r[k], 0);
+  const head = ["GST Rate", "Taxable", ...(split ? ["CGST", "SGST"] : ["IGST"]), "GST Amount"];
+  const rows = t.gst_summary.map((r) => [
+    formatPct(r.rate),
+    formatAmount(r.taxable),
+    ...(split ? [formatAmount(r.cgst), formatAmount(r.sgst)] : [formatAmount(r.igst)]),
+    formatAmount(r.tax),
+  ]);
+  const foot = [
+    "Total",
+    formatAmount(t.taxable_total),
+    ...(split ? [formatAmount(total("cgst")), formatAmount(total("sgst"))] : [formatAmount(total("igst"))]),
+    formatAmount(t.tax_total),
+  ];
+  const cell = (i: number) => [s.gsCell, i === 0 ? { textAlign: "left" as const, flex: 0.8 } : {}];
+  return (
+    <View>
+      <Text style={s.label}>GST SUMMARY</Text>
+      <View style={s.gsTable}>
+        <View style={s.gsHead}>
+          {head.map((h, i) => (
+            <Text key={i} style={cell(i)}>{h}</Text>
+          ))}
+        </View>
+        {rows.map((r, j) => (
+          <View key={j} style={s.gsRow}>
+            {r.map((x, i) => (
+              <Text key={i} style={cell(i)}>{x}</Text>
+            ))}
+          </View>
+        ))}
+        <View style={[s.gsRow, { fontWeight: 700 }]}>
+          {foot.map((x, i) => (
+            <Text key={i} style={cell(i)}>{x}</Text>
+          ))}
+        </View>
+      </View>
     </View>
   );
 }

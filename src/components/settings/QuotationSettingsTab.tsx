@@ -65,7 +65,7 @@ export function QuotationSettingsTab() {
 
       <Card title="Tax & Totals">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Default GST Rate (%)" error={errors.default_gst_rate}>
+          <Field label="GST Rate for New Materials (%)" error={errors.default_gst_rate} hint="Pre-filled when adding a material; each material keeps its own rate">
             <Input type="number" min={0} max={100} step="any" value={f.default_gst_rate} onChange={(e) => set("default_gst_rate", Number(e.target.value))} />
           </Field>
           <Field label="Default Tax Type">

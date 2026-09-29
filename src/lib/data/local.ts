@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, SEED_COMPANIES, SEED_MATERIALS, SEED_UNITS } from "../defaults";
+import { computeTotals } from "../tax";
 import type { Company, Material, Quotation, QuotationSettings, UnitType } from "../types";
 import type { Backend, Usage } from "./backend";
 import { newId } from "./repo";
@@ -35,10 +36,31 @@ export function seed(db: DB): DB {
     db.materials.push({ ...m, id: newId(), default_unit_id: unitByCode(default_unit) ?? null, unit_ids, created_at: ts, updated_at: ts });
   }
   for (const c of SEED_COMPANIES) {
-    if (db.companies.some((x) => norm(x.company_name) === norm(c.company_name))) continue;
+    const existing = db.companies.find((x) => norm(x.company_name) === norm(c.company_name));
+    // Fill a known GSTIN only if the admin hasn't entered one; never overwrite.
+    if (existing) {
+      if (!existing.gstin?.trim() && c.gstin) existing.gstin = c.gstin;
+      continue;
+    }
     db.companies.push({ ...clone(c), id: newId(), created_at: ts, updated_at: ts } as Company);
   }
   db.settings = { ...DEFAULT_SETTINGS, ...db.settings };
+  return upgrade(db);
+}
+
+/** Brings data saved by earlier versions up to the current shape. */
+function upgrade(db: DB): DB {
+  for (const m of db.materials) {
+    if (m.tax_type == null) m.tax_type = "GST";
+    if (m.gst_rate == null) {
+      const seeded = SEED_MATERIALS.find((x) => norm(x.name) === norm(m.name));
+      m.gst_rate = seeded?.gst_rate ?? db.settings.default_gst_rate ?? 0;
+    }
+  }
+  for (const q of db.quotations) {
+    for (const it of q.items) if (it.gst_overridden == null) it.gst_overridden = false;
+    if (!q.totals.gst_summary) q.totals = computeTotals(q.items, q.tax_mode, db.settings.round_off_total);
+  }
   return db;
 }
 

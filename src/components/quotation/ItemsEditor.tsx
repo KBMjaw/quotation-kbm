@@ -1,8 +1,9 @@
 "use client";
 
-import { formatAmount, lineAmounts, unitLabel } from "@/lib/calc";
+import { formatAmount, formatPct, unitLabel } from "@/lib/calc";
 import { newId } from "@/lib/data/repo";
-import type { Material, QuotationItem, UnitType } from "@/lib/types";
+import { GST_SLABS, lineAmounts, materialGstRate } from "@/lib/tax";
+import type { Material, QuotationItem, TaxMode, UnitType } from "@/lib/types";
 import type { Errors } from "@/lib/validation";
 import { Button, Field, Input, Select, cx } from "../ui";
 
@@ -11,12 +12,13 @@ interface Props {
   onChange: (items: QuotationItem[]) => void;
   materials: Material[];
   units: UnitType[];
-  defaultGst: number;
-  showGst: boolean;
+  taxMode: TaxMode;
+  /** Admins may replace a material's configured GST rate on a single line */
+  canOverrideGst: boolean;
   errors: Errors;
 }
 
-export function newItem(defaultGst: number): QuotationItem {
+export function newItem(): QuotationItem {
   return {
     id: newId(),
     material_id: null,
@@ -29,7 +31,8 @@ export function newItem(defaultGst: number): QuotationItem {
     unit_name: "",
     rate: 0,
     discount_pct: 0,
-    gst_rate: defaultGst,
+    gst_rate: 0,
+    gst_overridden: false,
   };
 }
 
@@ -42,7 +45,8 @@ export function unitsFor(material: Material | undefined, units: UnitType[]): Uni
 
 const toNum = (s: string) => (s.trim() === "" ? NaN : Number(s));
 
-export function ItemsEditor({ items, onChange, materials, units, defaultGst, showGst, errors }: Props) {
+export function ItemsEditor({ items, onChange, materials, units, taxMode, canOverrideGst, errors }: Props) {
+  const showGst = taxMode !== "NONE";
   const activeMaterials = materials.filter((m) => m.is_active);
 
   const update = (i: number, patch: Partial<QuotationItem>) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
@@ -64,6 +68,9 @@ export function ItemsEditor({ items, onChange, materials, units, defaultGst, sho
       unit_code: unit?.code ?? "",
       unit_name: unit?.name ?? "",
       rate: !it.rate && m.default_rate ? m.default_rate : it.rate,
+      // GST always comes from the material's configuration.
+      gst_rate: materialGstRate(m),
+      gst_overridden: false,
     });
   };
 
@@ -94,13 +101,14 @@ export function ItemsEditor({ items, onChange, materials, units, defaultGst, sho
         // Keep showing a unit/material that has since been disabled so old quotations stay editable.
         const unitOptions = it.unit_id && !allowedUnits.some((u) => u.id === it.unit_id) ? [...allowedUnits, ...units.filter((u) => u.id === it.unit_id)] : allowedUnits;
         const materialMissing = it.material_id && !activeMaterials.some((m) => m.id === it.material_id);
-        const a = lineAmounts({ ...it, quantity: Number.isFinite(it.quantity) ? it.quantity : 0, rate: Number.isFinite(it.rate) ? it.rate : 0 });
+        const a = lineAmounts(it, taxMode);
+        const configuredGst = material ? materialGstRate(material) : null;
         return (
           <div key={it.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3" data-testid="item-row">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500">
                 Item {i + 1}
-                <span className="ml-2 text-sm text-slate-800" data-testid="item-amount">₹{formatAmount(a.taxable)}</span>
+                <span className="ml-2 text-sm text-slate-800" data-testid="item-amount">₹{formatAmount(a.total)}</span>
               </span>
               <div className="flex gap-1">
                 <Button size="sm" variant="ghost" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</Button>
@@ -137,7 +145,7 @@ export function ItemsEditor({ items, onChange, materials, units, defaultGst, sho
                   aria-label={`Quantity for item ${i + 1}`}
                 />
               </Field>
-              <Field label="Unit" required error={e("unit")} className="md:col-span-3">
+              <Field label="Unit" required error={e("unit")} className="md:col-span-4">
                 <Select value={it.unit_id ?? ""} onChange={(ev) => pickUnit(i, ev.target.value)} invalid={!!e("unit")} aria-label={`Unit for item ${i + 1}`}>
                   <option value="">Unit…</option>
                   {unitOptions.map((u) => (
@@ -146,7 +154,7 @@ export function ItemsEditor({ items, onChange, materials, units, defaultGst, sho
                   {!it.unit_id && it.unit_code && <option value="">{it.unit_code}</option>}
                 </Select>
               </Field>
-              <Field label="Rate (₹)" required error={e("rate")} className="md:col-span-3">
+              <Field label="Rate (₹)" required error={e("rate")} className="md:col-span-2">
                 <Input
                   type="number"
                   inputMode="decimal"
@@ -171,21 +179,86 @@ export function ItemsEditor({ items, onChange, materials, units, defaultGst, sho
                 />
               </Field>
               <Field label="GST %" error={e("gst")} className="md:col-span-2">
-                <Select
-                  value={String(it.gst_rate)}
-                  onChange={(ev) => update(i, { gst_rate: Number(ev.target.value) })}
-                  disabled={!showGst}
-                >
-                  {[...new Set([0, 5, 12, 18, 28, it.gst_rate])].sort((a, b) => a - b).map((r) => (
-                    <option key={r} value={r}>{r}%</option>
-                  ))}
-                </Select>
+                {it.gst_overridden && canOverrideGst ? (
+                  <div className="flex gap-1">
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={100}
+                      step="any"
+                      list="gst-slabs"
+                      value={Number.isFinite(it.gst_rate) ? it.gst_rate : ""}
+                      onChange={(ev) => update(i, { gst_rate: toNum(ev.target.value) })}
+                      invalid={!!e("gst")}
+                      aria-label={`GST override for item ${i + 1}`}
+                      disabled={!showGst}
+                    />
+                  </div>
+                ) : (
+                  <span
+                    className={cx(
+                      "flex h-[38px] items-center justify-between rounded-lg border border-slate-200 bg-slate-100 px-3 text-sm",
+                      !showGst && "text-slate-400",
+                    )}
+                    data-testid="item-gst"
+                    title="GST rate configured for this material in Settings → Materials"
+                  >
+                    {showGst ? formatPct(it.gst_rate) : "—"}
+                    {it.gst_overridden && <span className="text-[10px] text-amber-600">override</span>}
+                  </span>
+                )}
               </Field>
+              <div className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 md:col-span-12">
+                {showGst ? (
+                  <>
+                    <span>Taxable <b className="text-slate-700">₹{formatAmount(a.taxable)}</b></span>
+                    <span>
+                      GST {formatPct(it.gst_rate)} <b className="text-slate-700">₹{formatAmount(a.tax)}</b>
+                      {taxMode === "CGST_SGST" && a.tax > 0 && ` (CGST ₹${formatAmount(a.cgst)} + SGST ₹${formatAmount(a.sgst)})`}
+                    </span>
+                    <span>Total <b className="text-slate-700">₹{formatAmount(a.total)}</b></span>
+                  </>
+                ) : (
+                  <span>Amount <b className="text-slate-700">₹{formatAmount(a.taxable)}</b> (no GST)</span>
+                )}
+                <span className="ml-auto flex gap-2">
+                  {!it.gst_overridden && configuredGst != null && configuredGst !== it.gst_rate && (
+                    <button
+                      type="button"
+                      className="text-brand-700 underline"
+                      onClick={() => update(i, { gst_rate: configuredGst })}
+                      title="This line was saved with an earlier GST rate"
+                    >
+                      Material GST is now {formatPct(configuredGst)}: apply
+                    </button>
+                  )}
+                  {canOverrideGst && showGst && it.material_id && !it.gst_overridden && (
+                    <button type="button" className="text-brand-700 underline" onClick={() => update(i, { gst_overridden: true })}>
+                      Override GST
+                    </button>
+                  )}
+                  {canOverrideGst && it.gst_overridden && (
+                    <button
+                      type="button"
+                      className="text-brand-700 underline"
+                      onClick={() => update(i, { gst_overridden: false, gst_rate: configuredGst ?? it.gst_rate })}
+                    >
+                      Use material GST{configuredGst != null ? ` (${formatPct(configuredGst)})` : ""}
+                    </button>
+                  )}
+                </span>
+              </div>
             </div>
           </div>
         );
       })}
-      <Button variant="secondary" onClick={() => onChange([...items, newItem(defaultGst)])}>
+      <datalist id="gst-slabs">
+        {GST_SLABS.map((r) => (
+          <option key={r} value={r} />
+        ))}
+      </datalist>
+      <Button variant="secondary" onClick={() => onChange([...items, newItem()])}>
         + Add Material
       </Button>
     </div>

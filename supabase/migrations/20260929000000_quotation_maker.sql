@@ -1,7 +1,6 @@
 -- KIPIPL Quotation Maker schema
 -- Safe to re-run: every object is created only if missing, seed rows use ON CONFLICT DO NOTHING.
 
-create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------------------
 -- Users & roles (uses Supabase Auth; first user to sign up becomes admin)

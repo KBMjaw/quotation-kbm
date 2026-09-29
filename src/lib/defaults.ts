@@ -72,17 +72,26 @@ export const SEED_UNITS: UnitInput[] = [
 
 /** Materials reference units by code; resolved to ids when seeding */
 export const SEED_MATERIALS: (Omit<MaterialInput, "default_unit_id" | "unit_ids"> & { default_unit: string; units: string[] })[] = [
-  { name: "Flyash", code: "FLYASH", description: "Flyash", hsn_code: "2621", default_rate: null, default_unit: "MT", units: ["MT", "M3"], is_active: true },
-  { name: "P Sand Dry", code: "PSAND-DRY", description: "P Sand Dry", hsn_code: "2517", default_rate: null, default_unit: "M3", units: ["M3", "MT", "UNIT"], is_active: true },
+  { name: "Flyash", code: "FLYASH", description: "Flyash", hsn_code: "2621", default_rate: null, gst_rate: 5, tax_type: "GST", default_unit: "MT", units: ["MT", "M3"], is_active: true },
+  { name: "P Sand Dry", code: "PSAND-DRY", description: "P Sand Dry", hsn_code: "2517", default_rate: null, gst_rate: 5, tax_type: "GST", default_unit: "M3", units: ["M3", "MT", "UNIT"], is_active: true },
 ];
 
 export const SEED_COMPANIES: CompanyInput[] = [
-  { ...emptyCompany(), company_name: "Kannan Blue Metals", display_name: "KANNAN BLUE METALS", quotation_prefix: "KBM", brand_color: "#1F3A93" },
+  {
+    ...emptyCompany(),
+    company_name: "Kannan Blue Metals",
+    display_name: "KANNAN BLUE METALS",
+    gstin: "33ACCPC2634C1ZI",
+    quotation_prefix: "KBM",
+    brand_color: "#1F3A93",
+  },
+  // GSTIN intentionally blank until the administrator enters it.
   { ...emptyCompany(), company_name: "Kannan Ready Mix Concrete", display_name: "KANNAN READY MIX CONCRETE", quotation_prefix: "KRMC", brand_color: "#B45309" },
   {
     ...emptyCompany(),
     company_name: "Kannan Infra Projects India Private Limited",
     display_name: "KANNAN INFRA PROJECTS INDIA PRIVATE LIMITED",
+    gstin: "33AAJCK1677M1Z4",
     quotation_prefix: "KIPIPL",
     brand_color: "#0F766E",
   },
